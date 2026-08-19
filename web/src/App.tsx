@@ -29,7 +29,13 @@ export default function App() {
   const mediaRecRef = useRef<MediaRecorder | null>(null);
 
   const addEvent = useCallback((event: ControlEvent) => {
-    setEvents((previous) => [...previous.slice(-59), event]);
+    setEvents((previous) => [
+      ...previous.slice(-59),
+      {
+        ...event,
+        _time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      },
+    ]);
     if (event.type === 'agent_status') {
       setBusy(
         ['accepted', 'thinking', 'acting', 'acted', 'cancelling'].includes(
@@ -216,7 +222,12 @@ export default function App() {
           setScreenOpen(true);
           setFrame(blob);
         },
-        () => {
+        (event) => {
+          if (event.code === 4401) {
+            localStorage.removeItem(TOKEN_KEY);
+            setToken(null);
+            return;
+          }
           setScreenOpen(false);
           scheduleReconnect();
         },
@@ -225,7 +236,14 @@ export default function App() {
       controlWs = openControlSocket(
         token,
         (event) => addEvent(event),
-        scheduleReconnect,
+        (event) => {
+          if (event.code === 4401) {
+            localStorage.removeItem(TOKEN_KEY);
+            setToken(null);
+            return;
+          }
+          scheduleReconnect();
+        },
       );
       controlRef.current = controlWs;
     };
@@ -246,13 +264,34 @@ export default function App() {
 
   return (
     <div className="app">
+      <div className="graffiti" aria-hidden="true">
+        <svg className="tag tag-a" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="3 7" />
+          <circle cx="50" cy="50" r="12" fill="currentColor" />
+          <circle cx="22" cy="24" r="5" fill="currentColor" />
+          <circle cx="82" cy="70" r="7" fill="currentColor" />
+        </svg>
+        <svg className="tag tag-b" viewBox="0 0 100 100">
+          <path d="M22 22 L78 78 M78 22 L22 78" stroke="currentColor" strokeWidth="7" strokeLinecap="round" />
+        </svg>
+        <svg className="tag tag-c" viewBox="0 0 120 60">
+          <path d="M8 30 H96 M70 10 L98 30 L70 50" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <svg className="tag tag-d" viewBox="0 0 100 100">
+          <path d="M50 8 V92 M8 50 H92 M22 22 L78 78 M78 22 L22 78" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+        </svg>
+      </div>
       <header className="topbar">
-        <h1>Geass</h1>
+        <h1 className="logo">GEASS</h1>
         <button type="button" onClick={disconnect}>
           断开
         </button>
       </header>
       <div className="screen-wrap">
+        <span className="corner corner-tl" />
+        <span className="corner corner-tr" />
+        <span className="corner corner-bl" />
+        <span className="corner corner-br" />
         <ScreenView frame={frame} />
         {!screenOpen && <div className="screen-closed">屏幕连接已断开，正在重连…</div>}
       </div>

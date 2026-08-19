@@ -92,7 +92,10 @@ class FakeOpenAI:
 
             async def create(self, **kwargs: Any) -> FakeResponse:
                 self.parent.requests.append(kwargs)
-                return self.parent.script.pop(0)
+                item = self.parent.script.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
 
         class Chat:
             def __init__(self, parent: "FakeOpenAI") -> None:

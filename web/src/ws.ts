@@ -1,17 +1,18 @@
 import type { ControlEvent } from './types';
 
-function wsUrl(path: string, token: string): string {
+function wsUrl(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${location.host}${path}?token=${encodeURIComponent(token)}`;
+  return `${proto}://${location.host}${path}`;
 }
 
 export function openScreenSocket(
   token: string,
   onFrame: (blob: Blob) => void,
-  onClose: () => void,
+  onClose: (event: CloseEvent) => void,
   onError: () => void,
 ): WebSocket {
-  const ws = new WebSocket(wsUrl('/ws/screen', token));
+  // token 通过子协议传递，避免出现在 URL 与服务器日志中
+  const ws = new WebSocket(wsUrl('/ws/screen'), ['geass', token]);
   ws.binaryType = 'blob';
   ws.onmessage = (event) => {
     if (event.data instanceof Blob) onFrame(event.data);
@@ -24,11 +25,10 @@ export function openScreenSocket(
 export function openControlSocket(
   token: string,
   onMessage: (event: ControlEvent) => void,
-  onClose: () => void,
+  onClose: (event: CloseEvent) => void,
 ): WebSocket {
-  const ws = new WebSocket(wsUrl('/ws/control', token));
+  const ws = new WebSocket(wsUrl('/ws/control'), ['geass', token]);
   ws.onmessage = (event) => onMessage(JSON.parse(event.data) as ControlEvent);
   ws.onclose = onClose;
   return ws;
 }
-

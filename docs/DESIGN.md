@@ -56,7 +56,7 @@ Geass 是一个"手机指挥电脑"的系统：
 - 实时屏幕帧流（mss 抓屏 → JPEG → WebSocket，默认 15fps）；
 - 文字命令 + 语音命令（Web Speech API 优先，whisper-1 兜底转写）；
 - OpenAI 兼容接口的自建 Agent 循环（截图 → 视觉模型 → 工具调用 → pyautogui 执行 → 回填 → 循环）；
-- pyautogui 工具集：move/click/double_click/right_click/scroll/drag/type_text/key_press/wait/screenshot/finish；
+- pyautogui 工具集：move/click/double_click/right_click/scroll/drag/type_text/key_press/open_terminal/wait/screenshot/finish；
 - 手机端 PWA：画面显示、命令框、语音按钮、状态面板、停止按钮；
 - 局域网 + Token 认证。
 
@@ -80,10 +80,10 @@ Geass 是一个"手机指挥电脑"的系统：
 | `GET /api/info` | 服务信息（需 Token） |
 | `POST /api/transcribe` | 上传音频 → whisper-1 转文字（需 Token） |
 | `POST /api/agent/stop` | 停止当前 Agent 任务（需 Token） |
-| `WS /ws/screen?token=` | 服务端 → 客户端二进制 JPEG 帧 |
-| `WS /ws/control?token=` | 双向 JSON：`command` / `stop` / `ping`，状态事件 |
+| `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
+| `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping`，状态事件 |
 
-Token 通过 `X-GEASS-Token` 请求头（REST）或 query 参数（WS）传递。
+Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-WebSocket-Protocol` 子协议传递（客户端发送 `["geass", token]`），避免 token 出现在 URL 与访问日志中。
 
 ### 6.2 Agent 工具与坐标约定
 
@@ -108,21 +108,26 @@ Token 通过 `X-GEASS-Token` 请求头（REST）或 query 参数（WS）传递�
 
 ## 8. 安全模型
 
-- MVP 工具仅键鼠操作，无 shell/文件读写；
-- 局域网 + Token（服务端控制台显示，`GEASS_TOKEN` 可固定）；
+- 键鼠操作 + `open_terminal`（按模型意图在新终端窗口执行 shell 命令，无文件读写工具）；
+- 局域网 + Token（**每次启动随机生成**并在控制台打印，`GEASS_TOKEN` 可显式固定）；
 - 手机端随时可停止；Agent 单任务有步数上限；
-- 隐私：截图会发送至 OpenAI，敏感窗口请自行规避；后续可加本地 OCR/脱敏。
+- 隐私：截图会发送至配置的模型服务商，敏感窗口请自行规避；后续可加本地 OCR/脱敏。
 
 ## 9. 配置
 
-见 `config.toml`，环境变量：
+配置按优先级合并：**环境变量 > `~/.geass/env.toml` > `config.toml` > 默认值**。统一环境变量：
 
-- `GEASS_API_KEY` / `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`：API Key（按此优先级取值）；
-- `GEASS_BASE_URL` / `OPENAI_BASE_URL`：覆盖 `agent.base_url`（OpenAI 兼容端点，DeepSeek 填 `https://api.deepseek.com`）；
-- `GEASS_TOKEN`：覆盖配置中的 token；
-- `GEASS_CONFIG`：指定配置文件路径。
+- `GEASS_API_KEY`：API Key；
+- `GEASS_BASE_URL`：OpenAI 兼容端点（DeepSeek 填 `https://api.deepseek.com`）；
+- `GEASS_MODEL`：模型名；
+- `GEASS_TOKEN`：可选，显式固定 Token（默认每次启动随机生成）；
+- `GEASS_CONFIG` / `GEASS_HOME`：项目配置文件路径 / 用户配置目录（默认 `~/.geass`）。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` 等）、Agent 用图长边 ≤1568、步数上限 30。
+持久化：启动时用过的 `GEASS_*` 环境变量会自动写入 `~/.geass/env.toml`（权限 0600），避免每次重复配置（Token 除外，每次启动随机）；也可通过 `python -m geass.config set/show` 或 `GET/POST /api/config` 管理（运行时热更新）。
+
+视觉兼容：`agent.vision` 控制是否给模型发截图。不支持图像输入的模型（如部分 DeepSeek）会在首次收到 400（`unknown variant image_url`）时自动降级为文本模式：只保留键盘类工具，并持久化 `vision=false`。
+
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、Agent 用图长边 ≤1568、步数上限 30。
 
 ## 10. 路线图
 

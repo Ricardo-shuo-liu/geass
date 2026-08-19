@@ -6,7 +6,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 node_modules/
-web/dist/
 runtime/
 .DS_Store
-
+test.log
+.env

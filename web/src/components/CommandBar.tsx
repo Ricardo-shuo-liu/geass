@@ -51,13 +51,11 @@ export function CommandBar({
         title="语音输入"
         aria-label="语音输入"
       >
-        {listening ? '⏹' : '🎤'}
+        {transcribing ? '…' : listening ? '⏹' : '🎤'}
       </button>
       <button type="button" className="send" onClick={submit} disabled={!text.trim()}>
-        发送
+        SEND
       </button>
-      {transcribing && <div className="hint">正在识别语音…</div>}
     </div>
   );
 }
-

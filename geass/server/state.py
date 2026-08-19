@@ -8,7 +8,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from ..agent import Agent
-from ..config import Config
+from ..config import Config, save_user_env
 from ..io.backend import InputBackend, PyAutoGUIInputBackend
 from ..screen import ScreenCapture, ScreenStreamer
 
@@ -41,8 +41,8 @@ def build_state(config: Config) -> AppState:
     streamer = ScreenStreamer(capture, fps=config.screen.fps)
     backend = PyAutoGUIInputBackend()
     client = None
-    if config.openai_api_key or config.agent.base_url:
-        kwargs: dict = {"api_key": config.openai_api_key or "not-needed"}
+    if config.api_key or config.agent.base_url:
+        kwargs: dict = {"api_key": config.api_key or "not-needed"}
         if config.agent.base_url:
             kwargs["base_url"] = config.agent.base_url
         client = AsyncOpenAI(**kwargs)
@@ -61,5 +61,24 @@ def build_state(config: Config) -> AppState:
         capture=capture,
         config=config.agent,
         status_cb=lambda message: broadcast_control(state, message),
+        vision_fallback_cb=lambda: save_user_env({"agent": {"vision": False}}),
     )
     return state
+
+
+def reload_state(state: AppState, config: Config) -> None:
+    """用新配置更新运行中的状态（模型客户端、Agent、画面参数、Token）。"""
+    state.config = config
+    client = None
+    if config.api_key or config.agent.base_url:
+        kwargs: dict = {"api_key": config.api_key or "not-needed"}
+        if config.agent.base_url:
+            kwargs["base_url"] = config.agent.base_url
+        client = AsyncOpenAI(**kwargs)
+    state.client = client
+    state.agent.client = client
+    state.agent.config = config.agent
+    state.agent.vision = config.agent.vision
+    state.capture.max_width = config.screen.max_width
+    state.capture.jpeg_quality = config.screen.jpeg_quality
+    state.streamer.interval = 1.0 / max(1, config.screen.fps)

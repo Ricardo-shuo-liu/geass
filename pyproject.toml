@@ -32,8 +32,3 @@ geass = "geass.main:main"
 
 [tool.setuptools.packages.find]
 include = ["geass*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-q"
-

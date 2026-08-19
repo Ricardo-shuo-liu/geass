@@ -33,6 +33,13 @@ export function ScreenView({ frame }: { frame: Blob | null }) {
     };
   }, [frame]);
 
+  if (!frame) {
+    return (
+      <div className="screen-placeholder">
+        <span className="screen-placeholder-dot" />
+        <span>CONNECTING</span>
+      </div>
+    );
+  }
   return <canvas ref={canvasRef} className="screen-canvas" />;
 }
-

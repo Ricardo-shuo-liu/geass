@@ -17,6 +17,10 @@ from .conftest import (
 )
 
 
+class BadRequestError(Exception):
+    """模拟 OpenAI SDK 的 400 错误。"""
+
+
 def build(script: list[FakeResponse], backend: FakeBackend | None = None):
     backend = backend or FakeBackend(size=(1920, 1080))
     client = FakeOpenAI(script)
@@ -58,6 +62,8 @@ def test_loop_executes_tools_then_finishes():
     assert client.requests
     assert client.requests[0]["model"] == "gpt-test"
     assert client.requests[0]["tools"]
+    assert client.requests[0]["tools"][0]["type"] == "function"
+    assert "name" in client.requests[0]["tools"][0]["function"]
     assert client.requests[0]["messages"][0]["role"] == "system"
 
 
@@ -102,3 +108,40 @@ def test_status_events_emitted():
     states = [event["state"] for event in events]
     assert "thinking" in states
     assert events[-1]["state"] == "done"
+
+
+def test_vision_fallback_when_model_rejects_images():
+    script = [
+        BadRequestError(
+            "Failed to deserialize: unknown variant `image_url`, expected `text`"
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "type_text", '{"text": "hi"}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, backend, client = build(script)
+
+    result = asyncio.run(agent.run("输入 hi"))
+
+    assert result["state"] == "done"
+    assert agent.vision is False
+    assert ("type_text", ("hi",), {}) in backend.calls
+    # 降级后的请求不应再携带图片，且工具列表只保留键盘类工具
+    for request in client.requests[1:]:
+        tool_names = {tool["function"]["name"] for tool in request["tools"]}
+        assert tool_names <= {"type_text", "key_press", "open_terminal", "wait", "finish"}
+        for message in request["messages"]:
+            content = message.get("content")
+            if isinstance(content, list):
+                assert not any(part.get("type") == "image_url" for part in content)

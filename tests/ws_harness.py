@@ -18,6 +18,7 @@ class WSClient:
         app: Any,
         path: str,
         query_string: bytes = b"",
+        headers: list[tuple[bytes, bytes]] | None = None,
     ) -> None:
         self.app = app
         self.scope = {
@@ -28,7 +29,7 @@ class WSClient:
             "path": path,
             "raw_path": path.encode() + (b"?" + query_string if query_string else b""),
             "query_string": query_string,
-            "headers": [],
+            "headers": headers or [],
             "client": ("test", 12345),
             "server": ("testserver", 80),
             "subprotocols": [],

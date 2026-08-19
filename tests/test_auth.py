@@ -37,7 +37,7 @@ def test_info_requires_token():
     denied_code, allowed_code, body = asyncio.run(run())
     assert denied_code == 401
     assert allowed_code == 200
-    assert body["openai_configured"] is False
+    assert body["api_configured"] is False
 
 
 def test_health_is_public():
@@ -110,7 +110,9 @@ def test_control_ws_ping_pong():
 
     async def run():
         async with WSClient(
-            app, "/ws/control", query_string=f"token={TOKEN}".encode()
+            app,
+            "/ws/control",
+            headers=[(b"sec-websocket-protocol", f"geass, {TOKEN}".encode())],
         ) as ws:
             await ws.send_json({"type": "ping"})
             assert await ws.receive_json() == {"type": "pong"}
@@ -123,8 +125,42 @@ def test_screen_ws_accepts_and_closes():
 
     async def run():
         async with WSClient(
-            app, "/ws/screen", query_string=f"token={TOKEN}".encode()
+            app,
+            "/ws/screen",
+            headers=[(b"sec-websocket-protocol", f"geass, {TOKEN}".encode())],
         ):
             pass
 
     asyncio.run(run())
+
+
+def test_config_endpoint_updates_and_persists(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
+    app = build_app()
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            headers = {"X-GEASS-Token": TOKEN}
+            before = await client.get("/api/config", headers=headers)
+            response = await client.post(
+                "/api/config",
+                headers=headers,
+                json={
+                    "model": "deepseek-chat",
+                    "base_url": "https://api.deepseek.com",
+                    "api_key": "sk-test",
+                    "vision": False,
+                },
+            )
+            return before.json(), response.status_code, response.json()
+
+    before, status, after = asyncio.run(run())
+    assert before["model"] == "gpt-test"
+    assert status == 200
+    assert after["model"] == "deepseek-chat"
+    assert after["vision"] is False
+    assert after["api_configured"] is True
+    assert (tmp_path / "home" / ".geass" / "env.toml").exists()

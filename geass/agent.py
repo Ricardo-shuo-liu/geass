@@ -5,12 +5,14 @@ import asyncio
 import base64
 import json
 import logging
+import platform
 from typing import Any, Awaitable, Callable
 
 from openai import AsyncOpenAI
 
 from .config import AgentConfig
 from .io.backend import InputBackend, InputError
+from .io.shell import open_terminal
 from .screen import ScreenCapture
 
 logger = logging.getLogger(__name__)
@@ -23,8 +25,33 @@ SYSTEM_PROMPT = (
     "2. 每次工具执行后都会附上新的屏幕截图，请先观察截图再决定下一步。\n"
     "3. 一次响应可以调用一个或多个工具；不确定界面状态时先用 screenshot 或 wait。\n"
     "4. 只执行用户任务范围内的操作，不做无关动作。\n"
-    "5. 任务完成或无法继续时，必须调用 finish 并说明结果。"
+    "5. 当用户要求打开终端执行 shell 命令时，直接调用 open_terminal 工具，"
+    "不要尝试手动模拟打开终端的快捷键。\n"
+    "6. 任务完成或无法继续时，必须调用 finish 并说明结果。"
 )
+
+
+def _environment_hint() -> str:
+    system = platform.system()
+    if system == "Linux":
+        return (
+            "当前被控电脑是 Linux 桌面（通常为 Ubuntu/GNOME/X11）。"
+            "打开终端使用组合键 ctrl+alt+t；打开应用启动器用 super（win）键。"
+        )
+    if system == "Windows":
+        return (
+            "当前被控电脑是 Windows。打开终端：按 win 键输入 cmd 后回车，"
+            "或按 ctrl+r 输入 cmd 回车。"
+        )
+    if system == "Darwin":
+        return (
+            "当前被控电脑是 macOS。打开终端：按 cmd+space 呼出 Spotlight，"
+            "输入 Terminal 后回车。"
+        )
+    return f"当前被控电脑系统：{system}。"
+
+
+ENVIRONMENT_HINT = _environment_hint()
 
 _NUMBER = {"type": "number", "minimum": 0.0, "maximum": 1.0}
 
@@ -123,6 +150,19 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "open_terminal",
+        "description": (
+            "打开一个新的终端窗口，并在其中执行一条 shell 命令。"
+            "command 留空则只打开空白终端；终端会保持打开以便查看输出。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "wait",
         "description": "等待指定秒数（0.1~10），用于等待界面加载。",
         "parameters": {
@@ -153,7 +193,15 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+TEXT_ONLY_TOOLS = {"type_text", "key_press", "open_terminal", "wait", "finish"}
+
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]]
+FallbackCallback = Callable[[], None]
+
+
+def _is_vision_rejection(exc: Exception) -> bool:
+    """识别"模型不支持图像输入"的 400 响应（如部分 DeepSeek 模型）。"""
+    return type(exc).__name__ == "BadRequestError" and "image_url" in str(exc)
 
 
 class AgentError(RuntimeError):
@@ -168,12 +216,15 @@ class Agent:
         capture: ScreenCapture,
         config: AgentConfig,
         status_cb: StatusCallback | None = None,
+        vision_fallback_cb: FallbackCallback | None = None,
     ) -> None:
         self.client = client
         self.backend = backend
         self.capture = capture
         self.config = config
         self.status_cb = status_cb
+        self.vision_fallback_cb = vision_fallback_cb
+        self.vision = config.vision
 
     async def _emit(
         self, state: str, step: int = 0, tool: str | None = None, message: str = ""
@@ -231,6 +282,8 @@ class Agent:
                 combo = str(args["combo"])
                 self.backend.key_press(combo)
                 return {"ok": True, "message": f"已按键 {combo}"}
+            if name == "open_terminal":
+                return open_terminal(str(args.get("command") or ""))
             if name == "wait":
                 seconds = min(10.0, max(0.0, float(args.get("seconds", 0.5))))
                 await asyncio.sleep(seconds)
@@ -246,40 +299,48 @@ class Agent:
     ) -> dict[str, Any]:
         if self.client is None:
             raise AgentError(
-                "未配置 API Key（GEASS_API_KEY / OPENAI_API_KEY / DEEPSEEK_API_KEY），"
-                "无法调用模型接口"
+                "未配置 API Key（GEASS_API_KEY），无法调用模型接口"
             )
 
         cancel = cancel or asyncio.Event()
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": command},
-        ]
         try:
-            first_frame = self.capture.capture_jpeg(self.config.image_max_edge)
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "当前屏幕状态如下："},
-                        self._image_content(first_frame),
-                    ],
-                }
-            )
+            messages = self._initial_messages(command)
         except Exception:
             logger.exception("初始截图失败")
             raise AgentError("无法抓取屏幕，Agent 无法启动")
 
+        tools = self._tools()
         for step in range(1, self.config.max_steps + 1):
             if cancel.is_set():
                 return {"state": "cancelled", "message": "任务已被用户中断"}
 
             await self._emit("thinking", step=step, message="正在观察屏幕并规划下一步…")
             try:
-                response = await self._create_response(messages)
+                response = await self._create_response(messages, tools)
             except Exception as exc:
-                logger.exception("模型调用失败")
-                return {"state": "error", "message": f"模型调用失败：{exc}"}
+                if self.vision and _is_vision_rejection(exc):
+                    logger.info("模型不支持视觉输入，自动切换为文本模式")
+                    self.vision = False
+                    if self.vision_fallback_cb is not None:
+                        try:
+                            self.vision_fallback_cb()
+                        except Exception:
+                            logger.warning("持久化 vision=false 失败", exc_info=True)
+                    tools = self._tools()
+                    messages = self._initial_messages(command)
+                    await self._emit(
+                        "thinking",
+                        step=step,
+                        message="模型不支持视觉输入，已自动切换为文本模式并重试",
+                    )
+                    try:
+                        response = await self._create_response(messages, tools)
+                    except Exception as exc2:
+                        logger.exception("模型调用失败")
+                        return {"state": "error", "message": f"模型调用失败：{exc2}"}
+                else:
+                    logger.exception("模型调用失败")
+                    return {"state": "error", "message": f"模型调用失败：{exc}"}
 
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None) or []
@@ -336,29 +397,34 @@ class Agent:
                 if cancel.is_set():
                     return {"state": "cancelled", "message": "任务已被用户中断"}
 
-            try:
-                frame = self.capture.capture_jpeg(self.config.image_max_edge)
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "工具执行后的最新屏幕截图："},
-                            self._image_content(frame),
-                        ],
-                    }
-                )
-            except Exception:
-                logger.warning("工具执行后截图失败")
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "（本次无法获取截图，请基于已有信息继续）",
-                    }
-                )
+            if self.vision:
+                try:
+                    frame = self.capture.capture_jpeg(self.config.image_max_edge)
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": "工具执行后的最新屏幕截图："},
+                                self._image_content(frame),
+                            ],
+                        }
+                    )
+                except Exception:
+                    logger.warning("工具执行后截图失败")
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "（本次无法获取截图，请基于已有信息继续）",
+                        }
+                    )
             messages.append(
                 {
                     "role": "user",
-                    "content": "请根据最新截图决定下一步操作；若任务已完成，调用 finish 总结结果。",
+                    "content": (
+                        "请根据最新截图决定下一步操作；若任务已完成，调用 finish 总结结果。"
+                        if self.vision
+                        else "请继续完成剩余步骤；若任务已完成，调用 finish 总结结果。"
+                    ),
                 }
             )
 
@@ -367,11 +433,60 @@ class Agent:
             "message": f"已达到 {self.config.max_steps} 步上限，任务终止",
         }
 
-    async def _create_response(self, messages: list[dict[str, Any]]):
+    def _system_prompt(self) -> str:
+        prompt = SYSTEM_PROMPT + "\n\n环境信息：" + ENVIRONMENT_HINT
+        if not self.vision:
+            prompt += (
+                "\n注意：当前模型不支持视觉输入。不要调用坐标类或截图工具"
+                "（move/click/double_click/right_click/scroll/drag/screenshot），"
+                "仅使用 type_text、key_press、wait 完成键盘类任务。"
+            )
+        return prompt
+
+    def _tools(self) -> list[dict[str, Any]]:
+        if self.vision:
+            source = TOOLS
+        else:
+            source = [tool for tool in TOOLS if tool["name"] in TEXT_ONLY_TOOLS]
+        # Chat Completions / DeepSeek 要求 function 字段嵌套：
+        # {"type":"function","function":{"name":...,"description":...,"parameters":...}}
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["parameters"],
+                },
+            }
+            for tool in source
+        ]
+
+    def _initial_messages(self, command: str) -> list[dict[str, Any]]:
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self._system_prompt()},
+            {"role": "user", "content": command},
+        ]
+        if self.vision:
+            frame = self.capture.capture_jpeg(self.config.image_max_edge)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "当前屏幕状态如下："},
+                        self._image_content(frame),
+                    ],
+                }
+            )
+        return messages
+
+    async def _create_response(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ):
         return await self.client.chat.completions.create(
             model=self.config.model,
             messages=messages,
-            tools=TOOLS,
+            tools=tools,
         )
 
     @staticmethod

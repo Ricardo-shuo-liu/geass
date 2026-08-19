@@ -3,20 +3,21 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import Query, WebSocket, WebSocketDisconnect
+from fastapi import WebSocket, WebSocketDisconnect
 
-from .auth import token_matches
+from .auth import ws_auth
 from .state import AppState, broadcast_control
 
 
 def register(app) -> None:
     @app.websocket("/ws/screen")
-    async def screen_ws(ws: WebSocket, token: str = Query(default="")):
+    async def screen_ws(ws: WebSocket):
         state: AppState = ws.app.state.geass
-        if not token_matches(state.config.server.token, token):
+        ok, subprotocol = ws_auth(ws)
+        if not ok:
             await ws.close(code=4401)
             return
-        await ws.accept()
+        await ws.accept(subprotocol=subprotocol)
         queue = state.streamer.subscribe()
         try:
             while True:
@@ -41,12 +42,13 @@ def register(app) -> None:
             state.streamer.unsubscribe(queue)
 
     @app.websocket("/ws/control")
-    async def control_ws(ws: WebSocket, token: str = Query(default="")):
+    async def control_ws(ws: WebSocket):
         state: AppState = ws.app.state.geass
-        if not token_matches(state.config.server.token, token):
+        ok, subprotocol = ws_auth(ws)
+        if not ok:
             await ws.close(code=4401)
             return
-        await ws.accept()
+        await ws.accept(subprotocol=subprotocol)
         state.control_clients.add(ws)
         try:
             while True:

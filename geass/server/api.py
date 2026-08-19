@@ -1,9 +1,32 @@
-"""REST 接口：健康检查、信息、语音兜底转写、停止 Agent。"""
+"""REST 接口：健康检查、信息、配置、语音兜底转写、停止 Agent。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from typing import Any
 
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from pydantic import BaseModel
+
+from ..config import load_config, mask_secret, save_user_env
 from .auth import require_token
+from .state import reload_state
+
+
+class ConfigUpdate(BaseModel):
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    vision: bool | None = None
+
+
+def config_summary(state) -> dict[str, Any]:
+    return {
+        "model": state.config.agent.model,
+        "base_url": state.config.agent.base_url or "",
+        "vision": state.config.agent.vision,
+        "api_key": mask_secret(state.config.api_key),
+        "api_configured": bool(state.client),
+        "voice_fallback_model": state.config.voice.fallback_model,
+    }
 
 
 def register(app) -> None:
@@ -24,10 +47,33 @@ def register(app) -> None:
             "version": "0.1.0",
             "model": state.config.agent.model,
             "base_url": state.config.agent.base_url or "（OpenAI 默认）",
+            "vision": state.config.agent.vision,
             "screen_size": screen_size,
             "agent_busy": bool(state.agent_task and not state.agent_task.done()),
-            "openai_configured": state.client is not None,
+            "api_configured": state.client is not None,
         }
+
+    @router.get("/api/config", dependencies=[Depends(require_token)])
+    async def get_config(request: Request):
+        return config_summary(request.app.state.geass)
+
+    @router.post("/api/config", dependencies=[Depends(require_token)])
+    async def update_config(request: Request, payload: ConfigUpdate):
+        state = request.app.state.geass
+        updates: dict[str, dict[str, Any]] = {"agent": {}}
+        for key in ("model", "base_url", "api_key"):
+            value = getattr(payload, key)
+            if value:
+                updates["agent"][key] = value
+        if payload.vision is not None:
+            updates["agent"]["vision"] = payload.vision
+        if not updates["agent"]:
+            raise HTTPException(status_code=400, detail="没有可更新的字段")
+
+        save_user_env(updates)
+        new_config = load_config(state.config.config_path, persist=False)
+        reload_state(state, new_config)
+        return config_summary(state)
 
     @router.post("/api/transcribe", dependencies=[Depends(require_token)])
     async def transcribe(request: Request, file: UploadFile = File(...)):

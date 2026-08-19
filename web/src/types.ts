@@ -16,13 +16,14 @@ export interface AgentStatus {
   step: number;
   tool?: string | null;
   message?: string;
+  _time?: string;
 }
 
 export interface AgentResult {
   type: 'agent_result';
   state: string;
   message: string;
+  _time?: string;
 }
 
 export type ControlEvent = AgentStatus | AgentResult;
-

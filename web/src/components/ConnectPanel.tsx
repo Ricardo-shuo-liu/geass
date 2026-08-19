@@ -17,8 +17,7 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
           onConnect(token.trim());
         }}
       >
-        <h1>Geass</h1>
-        <p>请输入服务器控制台显示的访问 Token</p>
+        <h1 className="logo logo-lg">GEASS</h1>
         <input
           type="password"
           value={token}
@@ -27,12 +26,11 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
           autoFocus
           autoComplete="off"
         />
-        <button type="submit" disabled={connecting || !token.trim()}>
-          {connecting ? '连接中…' : '连接'}
+        <button type="submit" className="btn-primary" disabled={connecting || !token.trim()}>
+          {connecting ? 'CONNECTING…' : 'CONNECT'}
         </button>
         {error && <div className="error">{error}</div>}
       </form>
     </div>
   );
 }
-
