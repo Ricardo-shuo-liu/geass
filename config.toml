@@ -1,0 +1,22 @@
+[server]
+host = "0.0.0.0"
+port = 8765
+# 留空则每次启动自动生成随机 token 并打印在控制台
+token = ""
+
+[screen]
+fps = 15
+jpeg_quality = 70
+max_width = 1920
+
+[agent]
+model = "deepseek-v4-flash"
+# OpenAI 兼容端点地址；使用 DeepSeek 时填 https://api.deepseek.com
+# 也可用环境变量 GEASS_BASE_URL / OPENAI_BASE_URL 覆盖
+base_url = "https://api.deepseek.com"
+max_steps = 30
+image_max_edge = 1568
+
+[voice]
+# DeepSeek 等无语音转写接口的端点可留空以禁用兜底转写（端侧识别仍可用）
+fallback_model = "whisper-1"
