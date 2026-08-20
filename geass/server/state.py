@@ -10,7 +10,10 @@ from openai import AsyncOpenAI
 from ..agent import Agent
 from ..config import Config, save_user_env
 from ..io.backend import InputBackend, PyAutoGUIInputBackend
+from ..io.terminal import TerminalManager
+from ..ocr import PaddleOCRBackend
 from ..screen import ScreenCapture, ScreenStreamer
+from ..skills import load_skills
 
 
 @dataclass
@@ -21,6 +24,9 @@ class AppState:
     backend: InputBackend
     agent: Agent
     client: AsyncOpenAI | None
+    terminal_manager: TerminalManager = field(default_factory=TerminalManager)
+    skills: list = field(default_factory=list)
+    ocr: Any = None
     control_clients: set = field(default_factory=set)
     agent_task: asyncio.Task | None = None
     cancel_event: asyncio.Event | None = None
@@ -47,6 +53,19 @@ def build_state(config: Config) -> AppState:
             kwargs["base_url"] = config.agent.base_url
         client = AsyncOpenAI(**kwargs)
 
+    terminal_manager = TerminalManager(default_timeout=config.agent.terminal_timeout)
+    skills = load_skills(config.agent.skills_dir, config.config_path)
+    ocr = (
+        PaddleOCRBackend(
+            token=config.agent.ocr_token,
+            model=config.agent.ocr_model,
+            base_url=config.agent.ocr_base_url,
+            timeout=config.agent.ocr_timeout,
+        )
+        if config.agent.ocr
+        else None
+    )
+
     state = AppState(
         config=config,
         capture=capture,
@@ -54,6 +73,9 @@ def build_state(config: Config) -> AppState:
         backend=backend,
         agent=None,  # type: ignore[arg-type]
         client=client,
+        terminal_manager=terminal_manager,
+        skills=skills,
+        ocr=ocr,
     )
     state.agent = Agent(
         client=client,
@@ -62,6 +84,9 @@ def build_state(config: Config) -> AppState:
         config=config.agent,
         status_cb=lambda message: broadcast_control(state, message),
         vision_fallback_cb=lambda: save_user_env({"agent": {"vision": False}}),
+        skills=skills,
+        terminal=terminal_manager,
+        ocr=ocr,
     )
     return state
 
@@ -79,6 +104,22 @@ def reload_state(state: AppState, config: Config) -> None:
     state.agent.client = client
     state.agent.config = config.agent
     state.agent.vision = config.agent.vision
+    state.agent.ocr_checked = False
+    state.agent.ocr_ready = False
+    state.agent.ocr = (
+        PaddleOCRBackend(
+            token=config.agent.ocr_token,
+            model=config.agent.ocr_model,
+            base_url=config.agent.ocr_base_url,
+            timeout=config.agent.ocr_timeout,
+        )
+        if config.agent.ocr
+        else None
+    )
+    state.ocr = state.agent.ocr
+    state.terminal_manager.default_timeout = config.agent.terminal_timeout
+    state.skills = load_skills(config.agent.skills_dir, config.config_path)
+    state.agent.skills = state.skills
     state.capture.max_width = config.screen.max_width
     state.capture.jpeg_quality = config.screen.jpeg_quality
     state.streamer.interval = 1.0 / max(1, config.screen.fps)

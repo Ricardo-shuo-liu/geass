@@ -4,8 +4,9 @@ import asyncio
 
 import pytest
 
-from geass.agent import Agent, AgentError
+from geass.agent import TEXT_ONLY_TOOLS, Agent, AgentError
 from geass.config import AgentConfig
+from geass.ocr import OCRBox, OCRResult
 
 from .conftest import (
     FakeBackend,
@@ -19,6 +20,22 @@ from .conftest import (
 
 class BadRequestError(Exception):
     """模拟 OpenAI SDK 的 400 错误。"""
+
+
+class FakeOCR:
+    def __init__(self, ok: bool = True) -> None:
+        self.ok = ok
+
+    def read(self, image):
+        if not self.ok:
+            return OCRResult(ok=False, error="fake failure")
+        return OCRResult(
+            ok=True,
+            boxes=[
+                OCRBox("hello", 0.99, 0.5, 0.5),
+                OCRBox("world", 0.98, 0.55, 0.55),
+            ],
+        )
 
 
 def build(script: list[FakeResponse], backend: FakeBackend | None = None):
@@ -140,8 +157,67 @@ def test_vision_fallback_when_model_rejects_images():
     # 降级后的请求不应再携带图片，且工具列表只保留键盘类工具
     for request in client.requests[1:]:
         tool_names = {tool["function"]["name"] for tool in request["tools"]}
-        assert tool_names <= {"type_text", "key_press", "open_terminal", "wait", "finish"}
+        assert tool_names <= TEXT_ONLY_TOOLS
         for message in request["messages"]:
             content = message.get("content")
             if isinstance(content, list):
                 assert not any(part.get("type") == "image_url" for part in content)
+
+
+def test_text_mode_with_ocr_keeps_mouse_tools_and_transcript():
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "click", '{"x": 0.5, "y": 0.5}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    backend = FakeBackend(size=(100, 100))
+    client = FakeOpenAI(script)
+    agent = Agent(
+        client=client,
+        backend=backend,
+        capture=FakeCapture(),
+        config=AgentConfig(model="deepseek-v4-flash", max_steps=5, vision=False),
+        ocr=FakeOCR(),
+    )
+
+    result = asyncio.run(agent.run("点击 hello"))
+
+    assert result["state"] == "done"
+    assert ("click", (50, 50, "left"), {}) in backend.calls
+    first_request = client.requests[0]
+    tool_names = {tool["function"]["name"] for tool in first_request["tools"]}
+    assert "click" in tool_names
+    messages_text = " ".join(
+        str(message.get("content", "")) for message in first_request["messages"]
+    )
+    assert "PaddleOCR" in messages_text
+    assert "[0.500,0.500] hello" in messages_text
+    assert not any(
+        isinstance(message.get("content"), list)
+        for message in first_request["messages"]
+    )
+
+
+def test_text_mode_without_ocr_stays_keyboard_only():
+    agent = Agent(
+        client=None,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(model="x", vision=False),
+        ocr=FakeOCR(ok=False),
+    )
+
+    tools = agent._tools()
+
+    assert {tool["function"]["name"] for tool in tools} <= TEXT_ONLY_TOOLS

@@ -5,6 +5,7 @@
 
 统一环境变量：
     GEASS_API_KEY / GEASS_BASE_URL / GEASS_MODEL / GEASS_TOKEN / GEASS_CONFIG / GEASS_HOME
+    GEASS_PADDLEOCR_TOKEN / GEASS_PADDLEOCR_MODEL / GEASS_PADDLEOCR_BASE_URL
 
 `python -m geass.main` 启动时若检测到 GEASS_* 环境变量，会把它们写入
 `~/.geass/env.toml`，下次运行无需重复配置；也可用
@@ -51,6 +52,13 @@ class AgentConfig:
     image_max_edge: int = 1568
     base_url: str = ""
     vision: bool = True
+    ocr: bool = True
+    ocr_token: str = ""
+    ocr_model: str = "PaddleOCR-VL-1.6"
+    ocr_base_url: str = "https://paddleocr.aistudio-app.com"
+    ocr_timeout: float = 90.0
+    terminal_timeout: float = 15.0
+    skills_dir: str = "skills"
 
 
 @dataclass
@@ -170,6 +178,52 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     vision = bool(
         pick(u_agent, "vision", pick(p_agent, "vision", True))
     )
+    ocr = bool(pick(u_agent, "ocr", pick(p_agent, "ocr", True)))
+    ocr_token = (
+        os.environ.get("GEASS_PADDLEOCR_TOKEN")
+        or os.environ.get("PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN")
+        or str(pick(u_agent, "ocr_token", pick(p_agent, "ocr_token", "")) or "")
+    )
+    ocr_model = os.environ.get(
+        "GEASS_PADDLEOCR_MODEL",
+        str(
+            pick(
+                u_agent,
+                "ocr_model",
+                pick(p_agent, "ocr_model", "PaddleOCR-VL-1.6"),
+            )
+        ),
+    )
+    ocr_base_url = os.environ.get(
+        "GEASS_PADDLEOCR_BASE_URL",
+        str(
+            pick(
+                u_agent,
+                "ocr_base_url",
+                pick(
+                    p_agent,
+                    "ocr_base_url",
+                    "https://paddleocr.aistudio-app.com",
+                ),
+            )
+            or ""
+        ),
+    )
+    ocr_timeout = max(
+        5.0,
+        float(pick(u_agent, "ocr_timeout", pick(p_agent, "ocr_timeout", 90.0))),
+    )
+    terminal_timeout = max(
+        0.5,
+        float(
+            pick(
+                u_agent,
+                "terminal_timeout",
+                pick(p_agent, "terminal_timeout", 15.0),
+            )
+        ),
+    )
+    skills_dir = str(pick(u_agent, "skills_dir", pick(p_agent, "skills_dir", "skills")))
 
     config = Config(
         server=ServerConfig(
@@ -188,6 +242,13 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             image_max_edge=max(1, int(pick(p_agent, "image_max_edge", 1568))),
             base_url=base_url,
             vision=vision,
+            ocr=ocr,
+            ocr_token=ocr_token,
+            ocr_model=ocr_model,
+            ocr_base_url=ocr_base_url,
+            ocr_timeout=ocr_timeout,
+            terminal_timeout=terminal_timeout,
+            skills_dir=skills_dir,
         ),
         voice=VoiceConfig(
             fallback_model=str(pick(p_voice, "fallback_model", "whisper-1")),
@@ -197,15 +258,22 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     )
 
     if persist:
-        _persist_runtime_values(model, base_url, api_key)
+        _persist_runtime_values(
+            model, base_url, api_key, ocr_token, ocr_model, ocr_base_url
+        )
 
     return config
 
 
 def _persist_runtime_values(
-    model: str, base_url: str, api_key: str
+    model: str,
+    base_url: str,
+    api_key: str,
+    ocr_token: str = "",
+    ocr_model: str = "",
+    ocr_base_url: str = "",
 ) -> None:
-    """启动时把环境变量沉淀到用户级配置，避免重复配置（token 除外）。"""
+    """启动时把环境变量沉淀到用户级配置，避免重复配置（访问 token 除外）。"""
     updates: dict[str, dict[str, Any]] = {"agent": {}}
     if "GEASS_MODEL" in os.environ and model:
         updates["agent"]["model"] = model
@@ -213,6 +281,12 @@ def _persist_runtime_values(
         updates["agent"]["base_url"] = base_url
     if "GEASS_API_KEY" in os.environ and api_key:
         updates["agent"]["api_key"] = api_key
+    if "GEASS_PADDLEOCR_TOKEN" in os.environ and ocr_token:
+        updates["agent"]["ocr_token"] = ocr_token
+    if "GEASS_PADDLEOCR_MODEL" in os.environ and ocr_model:
+        updates["agent"]["ocr_model"] = ocr_model
+    if "GEASS_PADDLEOCR_BASE_URL" in os.environ and ocr_base_url:
+        updates["agent"]["ocr_base_url"] = ocr_base_url
     save_user_env(updates)
 
 
@@ -245,6 +319,18 @@ def main() -> None:
     set_parser.add_argument(
         "--vision", choices=["true", "false"], help="模型是否支持图像输入"
     )
+    set_parser.add_argument(
+        "--ocr", choices=["true", "false"], help="是否启用 PaddleOCR 屏幕识别"
+    )
+    set_parser.add_argument("--ocr-token", help="PaddleOCR AI Studio 访问 Token")
+    set_parser.add_argument(
+        "--ocr-model", help="PaddleOCR 模型，如 PaddleOCR-VL-1.6 / PP-StructureV3"
+    )
+    set_parser.add_argument(
+        "--ocr-base-url",
+        help="PaddleOCR 服务端点（默认 https://paddleocr.aistudio-app.com）",
+    )
+    set_parser.add_argument("--skills-dir", help="SKILL 目录（默认项目下 skills）")
 
     args = parser.parse_args()
     if args.command == "show":
@@ -253,7 +339,11 @@ def main() -> None:
         print(f"model     = {config.agent.model}")
         print(f"base_url  = {config.agent.base_url or '（OpenAI 默认）'}")
         print(f"vision    = {config.agent.vision}")
+        print(f"ocr       = {config.agent.ocr}（model={config.agent.ocr_model}）")
+        print(f"ocr_url   = {config.agent.ocr_base_url}")
+        print(f"skills    = {config.agent.skills_dir}")
         print(f"api_key   = {mask_secret(config.api_key) or '（未设置）'}")
+        print(f"ocr_token = {mask_secret(config.agent.ocr_token) or '（未设置）'}")
         print("token     = 每次启动随机生成（启动时在控制台打印）")
         return
 
@@ -270,6 +360,16 @@ def main() -> None:
         updates["agent"]["api_key"] = args.api_key
     if args.vision is not None:
         updates["agent"]["vision"] = args.vision == "true"
+    if args.ocr is not None:
+        updates["agent"]["ocr"] = args.ocr == "true"
+    if args.ocr_token:
+        updates["agent"]["ocr_token"] = args.ocr_token
+    if args.ocr_model:
+        updates["agent"]["ocr_model"] = args.ocr_model
+    if args.ocr_base_url:
+        updates["agent"]["ocr_base_url"] = args.ocr_base_url
+    if args.skills_dir:
+        updates["agent"]["skills_dir"] = args.skills_dir
     if not updates["agent"]:
         parser.error("请至少提供一个 --xxx 参数")
     path = save_user_env(updates)

@@ -1,0 +1,12 @@
+# PaddleOCR 识别现在走 AI Studio 远程 jobs API，无需本地安装 paddlepaddle /
+# paddleocr（`paddleocr` 库已不再跟进 PaddleOCR-VL-1.6 / PP-StructureV3）。
+# 唯一额外运行依赖是 requests，已列入 requirements.txt。
+#
+# 配置访问 Token（与 LLM API Key 同样的方式）：
+#   python -m geass.config set --ocr-token YOUR_TOKEN --ocr-model PaddleOCR-VL-1.6
+#
+# 或环境变量（可用 MCP 配置中的 AI Studio Token 兜底）：
+#   export GEASS_PADDLEOCR_TOKEN=YOUR_TOKEN
+#   export PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN=YOUR_TOKEN
+#
+# 详见 README「PaddleOCR（AI Studio 远程 API）」一节。

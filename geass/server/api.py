@@ -16,6 +16,10 @@ class ConfigUpdate(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     vision: bool | None = None
+    ocr: bool | None = None
+    ocr_token: str | None = None
+    ocr_model: str | None = None
+    ocr_base_url: str | None = None
 
 
 def config_summary(state) -> dict[str, Any]:
@@ -23,6 +27,12 @@ def config_summary(state) -> dict[str, Any]:
         "model": state.config.agent.model,
         "base_url": state.config.agent.base_url or "",
         "vision": state.config.agent.vision,
+        "ocr": state.config.agent.ocr,
+        "ocr_model": state.config.agent.ocr_model,
+        "ocr_base_url": state.config.agent.ocr_base_url,
+        "ocr_token": mask_secret(state.config.agent.ocr_token),
+        "ocr_configured": bool(state.config.agent.ocr_token),
+        "skills_dir": state.config.agent.skills_dir,
         "api_key": mask_secret(state.config.api_key),
         "api_configured": bool(state.client),
         "voice_fallback_model": state.config.voice.fallback_model,
@@ -65,8 +75,14 @@ def register(app) -> None:
             value = getattr(payload, key)
             if value:
                 updates["agent"][key] = value
+        for key in ("ocr_token", "ocr_model", "ocr_base_url"):
+            value = getattr(payload, key)
+            if value:
+                updates["agent"][key] = value
         if payload.vision is not None:
             updates["agent"]["vision"] = payload.vision
+        if payload.ocr is not None:
+            updates["agent"]["ocr"] = payload.ocr
         if not updates["agent"]:
             raise HTTPException(status_code=400, detail="没有可更新的字段")
 

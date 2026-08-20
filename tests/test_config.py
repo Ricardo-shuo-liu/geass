@@ -142,3 +142,98 @@ def test_token_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("GEASS_TOKEN", "fixed-via-env")
     config = load_config(project)
     assert config.server.token == "fixed-via-env"
+
+
+def test_ocr_defaults(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+
+    config = load_config(project)
+
+    assert config.agent.ocr is True
+    assert config.agent.ocr_token == ""
+    assert config.agent.ocr_model == "PaddleOCR-VL-1.6"
+    assert config.agent.ocr_base_url == "https://paddleocr.aistudio-app.com"
+    assert config.agent.ocr_timeout == 90.0
+
+
+def test_ocr_env_overrides(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text(
+        '[agent]\nocr_model = "PP-StructureV3"\n'
+        'ocr_base_url = "https://old.test"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GEASS_PADDLEOCR_TOKEN", "env-ocr-token")
+    monkeypatch.setenv("GEASS_PADDLEOCR_MODEL", "PaddleOCR-VL-1.6")
+    monkeypatch.setenv("GEASS_PADDLEOCR_BASE_URL", "https://new.test")
+
+    config = load_config(project)
+
+    assert config.agent.ocr_token == "env-ocr-token"
+    assert config.agent.ocr_model == "PaddleOCR-VL-1.6"
+    assert config.agent.ocr_base_url == "https://new.test"
+
+
+def test_ocr_token_mcp_env_fallback(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+    monkeypatch.setenv("PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN", "mcp-token")
+
+    config = load_config(project)
+
+    assert config.agent.ocr_token == "mcp-token"
+
+
+def test_ocr_settings_from_user_env(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+    home = tmp_path / "home"
+    monkeypatch.setenv("GEASS_HOME", str(home))
+    user_env = home / ".geass" / "env.toml"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text(
+        '[agent]\nocr_token = "user-ocr"\nocr_model = "PP-StructureV3"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(project)
+
+    assert config.agent.ocr_token == "user-ocr"
+    assert config.agent.ocr_model == "PP-StructureV3"
+
+
+def test_ocr_persist_writes_user_env(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+    home = tmp_path / "home"
+    monkeypatch.setenv("GEASS_HOME", str(home))
+    monkeypatch.setenv("GEASS_PADDLEOCR_TOKEN", "persist-ocr")
+    monkeypatch.setenv("GEASS_PADDLEOCR_MODEL", "PP-StructureV3")
+    monkeypatch.setenv("GEASS_PADDLEOCR_BASE_URL", "https://persist.test")
+
+    load_config(project, persist=True)
+    assert user_env_path().exists()
+
+    for key in (
+        "GEASS_PADDLEOCR_TOKEN",
+        "GEASS_PADDLEOCR_MODEL",
+        "GEASS_PADDLEOCR_BASE_URL",
+    ):
+        monkeypatch.delenv(key)
+    config = load_config(project)
+    assert config.agent.ocr_token == "persist-ocr"
+    assert config.agent.ocr_model == "PP-StructureV3"
+    assert config.agent.ocr_base_url == "https://persist.test"
+
+
+def test_ocr_token_masked_in_show(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GEASS_PADDLEOCR_TOKEN", "secret-ocr-token-value")
+
+    from geass.config import mask_secret
+
+    config = load_config(project)
+    assert mask_secret(config.agent.ocr_token) == "secr...alue"

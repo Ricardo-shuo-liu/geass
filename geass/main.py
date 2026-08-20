@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import socket
+import struct
 
 import uvicorn
 
@@ -9,6 +11,44 @@ from .config import load_config
 from .server.app import create_app
 from .server.state import build_state
 
+
+def lan_ips() -> list[str]:
+    """枚举本机局域网 IPv4 地址（不含 127.0.0.0/8）。
+
+    优先解析主机名，失败时再逐网卡读 IPv4 地址；网络不可用时返回空列表。
+    """
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET
+        ):
+            ip = str(info[4][0])
+            if not ip.startswith("127.") and ip not in ips:
+                ips.append(ip)
+    except OSError:
+        pass
+
+    try:
+        import fcntl
+
+        names = [name for _, name in socket.if_nameindex()]
+    except (ImportError, OSError):
+        names = []
+    for name in names:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                # Linux SIOCGIFADDR
+                packed = fcntl.ioctl(
+                    sock.fileno(),
+                    0x8915,
+                    struct.pack("256s", name.encode()[:15]),
+                )
+                ip = socket.inet_ntoa(packed[20:24])
+        except OSError:
+            continue
+        if ip and not ip.startswith("127.") and ip not in ips:
+            ips.append(ip)
+    return ips
 
 def main() -> None:
     logging.basicConfig(
@@ -26,7 +66,11 @@ def main() -> None:
     print(f"  Agent 模型: {config.agent.model}")
     if config.agent.base_url:
         print(f"  接口地址:  {config.agent.base_url}")
-    print("  局域网设备请用电脑的局域网 IP 代替 localhost")
+    for ip in lan_ips():
+        print(f"  局域网访问:  http://{ip}:{config.server.port}")
+    if not config.agent.ocr_token:
+        print("  提示: 未配置 PaddleOCR token，非视觉模型将退化为键盘-only")
+    print("  异地访问:  ./scripts/remote.sh（无需同一 Wi-Fi，见 README）")
     print("=" * 56)
 
     uvicorn.run(app, host=config.server.host, port=config.server.port, log_level="info")

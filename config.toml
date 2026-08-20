@@ -17,8 +17,22 @@ model = "gpt-5.6-terra"
 base_url = ""
 # 模型是否支持图像输入（视觉）。不支持视觉的模型会自动降级为文本模式
 vision = true
+# 非视觉模型是否启用 PaddleOCR 把屏幕转成文本+坐标（AI Studio 远程 API）
+ocr = true
+# PaddleOCR 模型与远程服务端点
+ocr_model = "PaddleOCR-VL-1.6"
+ocr_base_url = "https://paddleocr.aistudio-app.com"
+# AI Studio 访问 Token：请写入个人配置，不要提交到仓库
+#   python -m geass.config set --ocr-token YOUR_TOKEN
+ocr_token = ""
+# 单个识别任务最长等待秒数（提交 + 轮询）
+ocr_timeout = 90
 max_steps = 30
 image_max_edge = 1568
+# open_terminal 一键执行命令时等待输出的超时（秒）
+terminal_timeout = 15
+# SKILL 目录：相对本项目根目录；每个子目录放一份 SKILL.md
+skills_dir = "skills"
 
 [voice]
 # DeepSeek 等无语音转写接口的端点可留空以禁用兜底转写（端侧识别仍可用）

@@ -27,6 +27,10 @@ def create_app(state: AppState) -> FastAPI:
                 await streamer_task
             except asyncio.CancelledError:
                 pass
+            try:
+                state.terminal_manager.close_all()
+            except Exception:
+                pass
 
     app = FastAPI(title="Geass", version="0.1.0", lifespan=lifespan)
     app.state.geass = state
@@ -53,4 +57,3 @@ def create_app(state: AppState) -> FastAPI:
             return FileResponse(DIST_DIR / "index.html")
 
     return app
-

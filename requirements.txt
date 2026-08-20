@@ -9,6 +9,8 @@ openai>=1.40
 pydantic>=2.7
 tomli>=2.0
 python-multipart>=0.0.9
+PyYAML>=6.0
+requests>=2.31
 
 # 测试依赖
 pytest>=8.0

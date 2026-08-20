@@ -7,6 +7,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from .auth import ws_auth
 from .state import AppState, broadcast_control
+from ..skills import load_skills
 
 
 def register(app) -> None:
@@ -108,6 +109,12 @@ async def start_agent(state: AppState, text: str) -> None:
             },
         )
         return
+
+    # 每条命令开始时重新扫描 SKILL 目录：新增/修改技能无需重启服务。
+    state.skills = load_skills(
+        state.config.agent.skills_dir, state.config.config_path
+    )
+    state.agent.skills = state.skills
 
     state.cancel_event = asyncio.Event()
 

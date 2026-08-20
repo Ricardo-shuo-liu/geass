@@ -3,6 +3,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from PIL import Image
+
 from geass.agent import Agent
 from geass.config import AgentConfig, Config
 from geass.io.backend import InputBackend
@@ -49,9 +51,13 @@ class FakeBackend(InputBackend):
 class FakeCapture:
     def __init__(self, jpeg: bytes = b"\xff\xd8fakejpeg\xff\xd9") -> None:
         self.jpeg = jpeg
+        self.image = Image.new("RGB", (100, 80), (255, 255, 255))
 
     def capture_jpeg(self, max_edge: int | None = None) -> bytes:
         return self.jpeg
+
+    def capture_image(self, max_edge: int | None = None) -> Image.Image:
+        return self.image
 
 
 class FakeToolCall:
