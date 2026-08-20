@@ -8,5 +8,5 @@ __pycache__/
 node_modules/
 runtime/
 .DS_Store
-test.log
 .env
+.vscode/settings.json
