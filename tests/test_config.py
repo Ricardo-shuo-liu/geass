@@ -237,3 +237,68 @@ def test_ocr_token_masked_in_show(monkeypatch, tmp_path):
 
     config = load_config(project)
     assert mask_secret(config.agent.ocr_token) == "secr...alue"
+
+
+def test_security_defaults(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+
+    config = load_config(project)
+
+    assert config.security.enabled is True
+    assert config.security.approval_timeout == 30.0
+    assert config.security.patterns == ()
+
+
+def test_security_from_file(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text(
+        "[security]\n"
+        "enabled = false\n"
+        "approval_timeout = 60\n"
+        'patterns = ["^sudo ", "reboot"]\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(project)
+
+    assert config.security.enabled is False
+    assert config.security.approval_timeout == 60.0
+    assert config.security.patterns == ("^sudo ", "reboot")
+
+
+def test_security_user_env_overrides_project(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text(
+        '[security]\nenabled = true\napproval_timeout = 60\n', encoding="utf-8"
+    )
+    home = tmp_path / "home"
+    monkeypatch.setenv("GEASS_HOME", str(home))
+    user_env = home / ".geass" / "env.toml"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text(
+        '[security]\nenabled = false\napproval_timeout = 120\n', encoding="utf-8"
+    )
+
+    config = load_config(project)
+
+    assert config.security.enabled is False
+    assert config.security.approval_timeout == 120.0
+
+
+def test_security_timeout_minimum(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text('[security]\napproval_timeout = 1\n', encoding="utf-8")
+
+    config = load_config(project)
+
+    assert config.security.approval_timeout == 5.0
+
+
+def test_security_empty_patterns_fall_back_to_defaults(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("[security]\npatterns = []\n", encoding="utf-8")
+
+    config = load_config(project)
+
+    assert config.security.patterns == ()

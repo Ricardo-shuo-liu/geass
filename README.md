@@ -22,7 +22,7 @@ Geass turns that fantasy into reality: **your PC is placed under a Geass, and yo
 - **PaddleOCR fallback** — models without vision input (e.g. `deepseek-v4-flash`) read the screen as text + normalized box coordinates (via the AI Studio remote API, no local Paddle install) instead of degrading to keyboard-only
 - **SKILL interface** — `skills/*/SKILL.md` files in the standard frontmatter format are discovered, listed, and loaded on demand (`read_skill`)
 - **Interruptible** — one-tap stop; the Agent also has a step limit
-- **Secure** — LAN token auth; WebSocket auth goes through the subprotocol (no token in URLs/logs); shell runs only via the `open_terminal` tool
+- **Safety boundary** — high-risk `open_terminal` commands (sudo, `rm -rf`, disk/format, power-off, uninstall, …) first pass a blocklist; a match pauses the Agent and shows an approval card on the phone (auto-denied after 30s) before the command runs; LAN token auth and one-tap stop remain in place
 
 ## Requirements
 
@@ -173,6 +173,9 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `screen.fps` | `15` | Stream FPS |
 | `screen.jpeg_quality` | `70` | JPEG quality |
 | `screen.max_width` | `1920` | Max stream width |
+| `security.enabled` | `true` | Manual review of high-risk shell commands |
+| `security.approval_timeout` | `30` | Seconds to wait for the phone's decision; timeout auto-denies (min 5s) |
+| `security.patterns` | empty | Custom blocklist regexes; empty uses the built-in list, non-empty replaces it |
 | `agent.model` | `gpt-5.6-terra` | Vision model (e.g. `sol` / `luna`) |
 | `agent.base_url` | empty | OpenAI-compatible endpoint; DeepSeek: `https://api.deepseek.com` |
 | `agent.vision` | `true` | Whether the model accepts images; non-vision models auto-degrade to text mode |
@@ -205,7 +208,7 @@ Environment variables:
 Precedence: **env vars > `~/.geass/env.toml` > `config.toml` > defaults**.
 
 - `GEASS_*` env vars used at startup are auto-saved to `~/.geass/env.toml` (mode 0600);
-- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`;
+- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; safety: `--security-enabled false` / `--approval-timeout 60`;
 - Runtime API: `GET /api/config` (masked) and `POST /api/config` (e.g. `{"model":"...","base_url":"...","api_key":"...","vision":false}`) — applied and persisted immediately.
 
 ## Project layout
@@ -214,10 +217,11 @@ Precedence: **env vars > `~/.geass/env.toml` > `config.toml` > defaults**.
 geass/
   geass/          # backend (pure Python)
     agent.py      # Agent loop + pyautogui toolkit
+    safety.py     # high-risk command blocklist policy
     ocr.py        # PaddleOCR AI Studio remote API backend
     skills.py     # SKILL.md loader + progressive disclosure
     asyncutil.py  # non-blocking bridge for terminal/OCR calls
-    server/       # FastAPI, WebSocket, auth
+    server/       # FastAPI, WebSocket, auth, approval gateway
     screen.py     # mss capture + frame streaming
     io/backend.py # input backend abstraction (PyAutoGUI)
     io/terminal.py# visible terminal sessions + output capture
@@ -245,6 +249,7 @@ cd web && npm run dev      # frontend HMR :5173 (proxied to 8765)
 - Endpoints without a transcription API (e.g. DeepSeek): set `voice.fallback_model` to empty; on-device recognition still works
 - pyautogui per-key typing handles Chinese IME poorly — prefer ASCII, or a clipboard approach later
 - Over plain HTTP on LAN, Web Speech API and Service Worker are unavailable: voice falls back to recorded upload, PWA degrades to a normal page
+- The v1 safety boundary only reviews `open_terminal` calls that carry a command; `terminal_type` streaming input and mouse/keyboard tools are not reviewed, so bypasses remain possible (to be extended later)
 - Screenshots are sent to your configured model provider; avoid sensitive content
 
 Full design and roadmap: [docs/DESIGN.md](docs/DESIGN.md).

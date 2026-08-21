@@ -1,20 +1,70 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ApprovalModal } from './components/ApprovalModal';
 import { CommandBar } from './components/CommandBar';
 import { ConnectPanel } from './components/ConnectPanel';
+import { DanmakuPanel } from './components/DanmakuPanel';
+import { DanmakuOverlay } from './components/DanmakuOverlay';
+import { LogDrawer } from './components/LogDrawer';
 import { ScreenView } from './components/ScreenView';
-import { StatusPanel } from './components/StatusPanel';
 import { apiInfo, stopAgent, transcribe } from './api';
-import { openControlSocket, openScreenSocket } from './ws';
-import type { ControlEvent } from './types';
+import { openControlSocket, openScreenSocket, sendApproval } from './ws';
+import type {
+  ApprovalRequest,
+  ControlEvent,
+  DanmakuDensity,
+  DanmakuIntensity,
+  DanmakuSize,
+} from './types';
 
 const TOKEN_KEY = 'geass-token';
+const DENSITY_KEY = 'geass-danmaku-density';
+const SIZE_KEY = 'geass-danmaku-size';
+const INTENSITY_KEY = 'geass-danmaku-intensity';
+const EVENT_LIMIT = 200;
+
+const DENSITY_ORDER: DanmakuDensity[] = ['all', 'key', 'minimal'];
+const DENSITY_LABELS: Record<DanmakuDensity, string> = {
+  all: '全部',
+  key: '关键',
+  minimal: '少量',
+};
+
+const SIZE_ORDER: DanmakuSize[] = ['small', 'medium', 'large'];
+const INTENSITY_ORDER: DanmakuIntensity[] = ['light', 'standard', 'strong'];
+
+const BUSY_STATES = [
+  'accepted',
+  'thinking',
+  'acting',
+  'acted',
+  'awaiting_approval',
+  'cancelling',
+];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function initialDensity(): DanmakuDensity {
+  const value = localStorage.getItem(DENSITY_KEY);
+  return DENSITY_ORDER.includes(value as DanmakuDensity)
+    ? (value as DanmakuDensity)
+    : 'key';
+}
+
+function initialSetting<T extends string>(
+  key: string,
+  fallback: T,
+  valid: readonly T[],
+): T {
+  const value = localStorage.getItem(key);
+  return value && valid.includes(value as T) ? (value as T) : fallback;
+}
+
 export default function App() {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState<string | null>(() =>
+    localStorage.getItem(TOKEN_KEY),
+  );
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [frame, setFrame] = useState<Blob | null>(null);
@@ -23,26 +73,39 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [density, setDensity] = useState<DanmakuDensity>(initialDensity);
+  const [danmakuSize, setDanmakuSize] = useState<DanmakuSize>(() =>
+    initialSetting(SIZE_KEY, 'medium', SIZE_ORDER),
+  );
+  const [danmakuIntensity, setDanmakuIntensity] =
+    useState<DanmakuIntensity>(() =>
+      initialSetting(INTENSITY_KEY, 'standard', INTENSITY_ORDER),
+    );
+  const [logOpen, setLogOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pendingApproval, setPendingApproval] =
+    useState<ApprovalRequest | null>(null);
 
   const controlRef = useRef<WebSocket | null>(null);
   const voiceRecRef = useRef<unknown>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);
 
   const addEvent = useCallback((event: ControlEvent) => {
-    setEvents((previous) => [
-      ...previous.slice(-59),
-      {
-        ...event,
-        _time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-      },
-    ]);
+    const stamped: ControlEvent = {
+      ...event,
+      _time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+    };
+    setEvents((previous) => [...previous.slice(-(EVENT_LIMIT - 1)), stamped]);
     if (event.type === 'agent_status') {
-      setBusy(
-        ['accepted', 'thinking', 'acting', 'acted', 'cancelling'].includes(
-          event.state,
-        ),
+      setBusy(BUSY_STATES.includes(event.state));
+    } else if (event.type === 'approval_request') {
+      setBusy(true);
+      setPendingApproval(event);
+    } else if (event.type === 'approval_resolved') {
+      setPendingApproval((previous) =>
+        previous && previous.id === event.id ? null : previous,
       );
-    } else {
+    } else if (event.type === 'agent_result') {
       setBusy(false);
     }
   }, []);
@@ -64,6 +127,12 @@ export default function App() {
   const disconnect = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setToken(null);
+    setFrame(null);
+    setEvents([]);
+    setBusy(false);
+    setPendingApproval(null);
+    setLogOpen(false);
+    setSettingsOpen(false);
   }, []);
 
   const sendCommand = useCallback(
@@ -107,6 +176,34 @@ export default function App() {
       });
     }
   }, [token, addEvent]);
+
+  const respondApproval = useCallback(
+    (approved: boolean) => {
+      const approval = pendingApproval;
+      if (!approval) return;
+      const ws = controlRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        sendApproval(ws, approval.id, approved);
+      }
+      setPendingApproval(null);
+    },
+    [pendingApproval],
+  );
+
+  const changeDensity = useCallback((value: DanmakuDensity) => {
+    setDensity(value);
+    localStorage.setItem(DENSITY_KEY, value);
+  }, []);
+
+  const changeDanmakuSize = useCallback((value: DanmakuSize) => {
+    setDanmakuSize(value);
+    localStorage.setItem(SIZE_KEY, value);
+  }, []);
+
+  const changeDanmakuIntensity = useCallback((value: DanmakuIntensity) => {
+    setDanmakuIntensity(value);
+    localStorage.setItem(INTENSITY_KEY, value);
+  }, []);
 
   const recordFallback = useCallback(async () => {
     try {
@@ -259,51 +356,94 @@ export default function App() {
   }, [token, addEvent]);
 
   if (!token) {
-    return <ConnectPanel connecting={connecting} error={connectError} onConnect={connect} />;
+    return (
+      <ConnectPanel
+        connecting={connecting}
+        error={connectError}
+        onConnect={connect}
+      />
+    );
   }
 
   return (
     <div className="app">
-      <div className="graffiti" aria-hidden="true">
-        <svg className="tag tag-a" viewBox="0 0 100 100">
-          <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="3 7" />
-          <circle cx="50" cy="50" r="12" fill="currentColor" />
-          <circle cx="22" cy="24" r="5" fill="currentColor" />
-          <circle cx="82" cy="70" r="7" fill="currentColor" />
-        </svg>
-        <svg className="tag tag-b" viewBox="0 0 100 100">
-          <path d="M22 22 L78 78 M78 22 L22 78" stroke="currentColor" strokeWidth="7" strokeLinecap="round" />
-        </svg>
-        <svg className="tag tag-c" viewBox="0 0 120 60">
-          <path d="M8 30 H96 M70 10 L98 30 L70 50" fill="none" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <svg className="tag tag-d" viewBox="0 0 100 100">
-          <path d="M50 8 V92 M8 50 H92 M22 22 L78 78 M78 22 L22 78" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-        </svg>
-      </div>
       <header className="topbar">
         <h1 className="logo">GEASS</h1>
-        <button type="button" onClick={disconnect}>
-          断开
-        </button>
+        <div className="topbar-actions">
+          <span className={`chip ${busy ? 'busy' : 'idle'}`}>
+            <span className="dot" />
+            {busy ? '执行中' : '空闲'}
+          </span>
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={() => setSettingsOpen((value) => !value)}
+            title="弹幕设置"
+          >
+            弹幕·{DENSITY_LABELS[density]}
+          </button>
+          <button
+            type="button"
+            className="tool-btn"
+            onClick={() => setLogOpen(true)}
+          >
+            日志
+          </button>
+          <button type="button" className="tool-btn danger" onClick={disconnect}>
+            断开
+          </button>
+        </div>
       </header>
-      <div className="screen-wrap">
-        <span className="corner corner-tl" />
-        <span className="corner corner-tr" />
-        <span className="corner corner-bl" />
-        <span className="corner corner-br" />
+
+      {settingsOpen && (
+        <DanmakuPanel
+          density={density}
+          size={danmakuSize}
+          intensity={danmakuIntensity}
+          onChangeDensity={changeDensity}
+          onChangeSize={changeDanmakuSize}
+          onChangeIntensity={changeDanmakuIntensity}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      <main className="stage">
         <ScreenView frame={frame} />
-        {!screenOpen && <div className="screen-closed">屏幕连接已断开，正在重连…</div>}
-      </div>
-      <StatusPanel events={events} busy={busy} />
-      <CommandBar
+        <DanmakuOverlay
+          events={events}
+          density={density}
+          size={danmakuSize}
+          intensity={danmakuIntensity}
+        />
+        {!screenOpen && (
+          <div className="screen-closed">屏幕连接已断开，正在重连…</div>
+        )}
+        {pendingApproval && (
+          <ApprovalModal
+            approval={pendingApproval}
+            onApprove={() => respondApproval(true)}
+            onDeny={() => respondApproval(false)}
+          />
+        )}
+      </main>
+
+      <footer className="dock">
+        <CommandBar
+          busy={busy}
+          listening={listening}
+          transcribing={transcribing}
+          onSend={sendCommand}
+          onStop={() => void stop()}
+          onStartVoice={startVoice}
+          onStopVoice={stopVoice}
+        />
+      </footer>
+
+      <LogDrawer
+        open={logOpen}
         busy={busy}
-        listening={listening}
-        transcribing={transcribing}
-        onSend={sendCommand}
-        onStop={() => void stop()}
-        onStartVoice={startVoice}
-        onStopVoice={stopVoice}
+        events={events}
+        onClose={() => setLogOpen(false)}
       />
     </div>
   );

@@ -11,10 +11,11 @@ from typing import Any, Awaitable, Callable
 from openai import AsyncOpenAI
 
 from .asyncutil import run_in_thread
-from .config import AgentConfig
+from .config import AgentConfig, SecurityConfig
 from .io.backend import InputBackend, InputError
 from .io.shell import open_terminal
 from .io.terminal import TerminalError, TerminalManager
+from .safety import evaluate_command
 from .screen import ScreenCapture
 from .skills import Skill, catalog_text, find_skill
 
@@ -32,7 +33,9 @@ SYSTEM_PROMPT = (
     "不要尝试手动模拟打开终端的快捷键。\n"
     "6. 如果用户任务匹配某个 SKILL 的描述，先调用 read_skill 获取该 SKILL"
     "的完整说明，再严格按说明执行；不要凭空编造不存在的技能。\n"
-    "7. 任务完成或无法继续时，必须调用 finish 并说明结果。"
+    "7. open_terminal 中的高危 shell 命令会先由用户审核；若审核被拒绝或超时，"
+    "不要重复提交同一命令，换用其他方式，或调用 finish 说明无法继续。\n"
+    "8. 任务完成或无法继续时，必须调用 finish 并说明结果。"
 )
 
 
@@ -300,6 +303,8 @@ class Agent:
         skills: list[Skill] | None = None,
         terminal: TerminalManager | None = None,
         ocr: Any = None,
+        security: SecurityConfig | None = None,
+        approval_gateway: Any = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -313,6 +318,8 @@ class Agent:
         self.ocr = ocr
         self.ocr_ready = False
         self.ocr_checked = False
+        self.security = security
+        self.approval_gateway = approval_gateway
 
     async def _emit(
         self, state: str, step: int = 0, tool: str | None = None, message: str = ""
@@ -372,6 +379,33 @@ class Agent:
                 return {"ok": True, "message": f"已按键 {combo}"}
             if name == "open_terminal":
                 command = str(args.get("command") or "")
+                if command.strip() and self.security is not None:
+                    verdict = evaluate_command(command, self.security.patterns)
+                    if verdict.blocked and self.security.enabled:
+                        if self.approval_gateway is None:
+                            return {
+                                "ok": False,
+                                "error": (
+                                    f"命令被安全边界拦截（{verdict.reason}），"
+                                    "且审核通道不可用，未执行"
+                                ),
+                            }
+                        await self._emit(
+                            "awaiting_approval",
+                            tool=name,
+                            message=f"等待审核：{command}",
+                        )
+                        decision = await self.approval_gateway.request(
+                            command, verdict.reason
+                        )
+                        if not decision.get("approved"):
+                            return {
+                                "ok": False,
+                                "error": str(
+                                    decision.get("reason")
+                                    or "命令未通过审核，未执行"
+                                ),
+                            }
                 if self.terminal is None:
                     return open_terminal(command)
                 return await run_in_thread(self.terminal.open, command)

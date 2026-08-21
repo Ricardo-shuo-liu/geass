@@ -32,3 +32,13 @@ export function openControlSocket(
   ws.onclose = onClose;
   return ws;
 }
+
+export function sendApproval(
+  ws: WebSocket,
+  id: string,
+  approved: boolean,
+): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'approval', id, approved }));
+  }
+}

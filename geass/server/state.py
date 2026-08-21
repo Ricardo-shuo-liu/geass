@@ -14,6 +14,7 @@ from ..io.terminal import TerminalManager
 from ..ocr import PaddleOCRBackend
 from ..screen import ScreenCapture, ScreenStreamer
 from ..skills import load_skills
+from .approval import ApprovalManager
 
 
 @dataclass
@@ -27,6 +28,7 @@ class AppState:
     terminal_manager: TerminalManager = field(default_factory=TerminalManager)
     skills: list = field(default_factory=list)
     ocr: Any = None
+    approval_manager: ApprovalManager = field(default_factory=ApprovalManager)
     control_clients: set = field(default_factory=set)
     agent_task: asyncio.Task | None = None
     cancel_event: asyncio.Event | None = None
@@ -55,6 +57,9 @@ def build_state(config: Config) -> AppState:
 
     terminal_manager = TerminalManager(default_timeout=config.agent.terminal_timeout)
     skills = load_skills(config.agent.skills_dir, config.config_path)
+    approval_manager = ApprovalManager(
+        default_timeout=config.security.approval_timeout
+    )
     ocr = (
         PaddleOCRBackend(
             token=config.agent.ocr_token,
@@ -76,7 +81,9 @@ def build_state(config: Config) -> AppState:
         terminal_manager=terminal_manager,
         skills=skills,
         ocr=ocr,
+        approval_manager=approval_manager,
     )
+    approval_manager.broadcast = lambda message: broadcast_control(state, message)
     state.agent = Agent(
         client=client,
         backend=backend,
@@ -87,6 +94,8 @@ def build_state(config: Config) -> AppState:
         skills=skills,
         terminal=terminal_manager,
         ocr=ocr,
+        security=config.security,
+        approval_gateway=approval_manager.request,
     )
     return state
 
@@ -117,6 +126,8 @@ def reload_state(state: AppState, config: Config) -> None:
         else None
     )
     state.ocr = state.agent.ocr
+    state.agent.security = config.security
+    state.approval_manager.default_timeout = config.security.approval_timeout
     state.terminal_manager.default_timeout = config.agent.terminal_timeout
     state.skills = load_skills(config.agent.skills_dir, config.config_path)
     state.agent.skills = state.skills

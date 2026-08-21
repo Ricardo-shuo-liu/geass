@@ -51,6 +51,17 @@ def register(app) -> None:
             return
         await ws.accept(subprotocol=subprotocol)
         state.control_clients.add(ws)
+        for pending in state.approval_manager.pending:
+            await ws.send_json(
+                {
+                    "type": "approval_request",
+                    "id": pending.id,
+                    "tool": "open_terminal",
+                    "command": pending.command,
+                    "reason": pending.reason,
+                    "expires_in": pending.expires_in,
+                }
+            )
         try:
             while True:
                 message = await ws.receive_json()
@@ -68,6 +79,7 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
     elif mtype == "stop":
         if state.cancel_event is not None:
             state.cancel_event.set()
+        await state.approval_manager.reject_all("任务已停止")
         await broadcast_control(
             state,
             {
@@ -92,6 +104,16 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
             )
             return
         await start_agent(state, text)
+    elif mtype == "approval":
+        approval_id = str(message.get("id") or "")
+        approved = bool(message.get("approved"))
+        if not await state.approval_manager.resolve(approval_id, approved):
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "message": "审核请求不存在或已处理",
+                }
+            )
     else:
         await ws.send_json({"type": "error", "message": f"未知消息类型：{mtype}"})
 
@@ -109,6 +131,9 @@ async def start_agent(state: AppState, text: str) -> None:
             },
         )
         return
+
+    # 上一个任务若残留未处理的审核请求，先全部拒绝，避免悬挂。
+    await state.approval_manager.reject_all("新任务已开始")
 
     # 每条命令开始时重新扫描 SKILL 目录：新增/修改技能无需重启服务。
     state.skills = load_skills(

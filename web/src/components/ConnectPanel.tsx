@@ -17,7 +17,7 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
           onConnect(token.trim());
         }}
       >
-        <h1 className="logo logo-lg">GEASS</h1>
+        <h1 className="logo-lg">GEASS</h1>
         <input
           type="password"
           value={token}
@@ -26,7 +26,11 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
           autoFocus
           autoComplete="off"
         />
-        <button type="submit" className="btn-primary" disabled={connecting || !token.trim()}>
+        <button
+          type="submit"
+          className="btn-primary"
+          disabled={connecting || !token.trim()}
+        >
           {connecting ? 'CONNECTING…' : 'CONNECT'}
         </button>
         {error && <div className="error">{error}</div>}

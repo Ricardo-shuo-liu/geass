@@ -69,13 +69,14 @@ Geass 是一个"手机指挥电脑"的系统：
 ## 5. 模块说明
 
 - `geass/paisley_park/` 对应实现中的 `geass/agent.py` + `geass/server/`：Agent 循环、协议、编排；
+- `geass/safety.py`：高危 shell 命令黑名单策略（不区分大小写正则匹配，返回是否拦截与原因）；
 - `geass/io/backend.py`：InputBackend 抽象与 PyAutoGUI 实现，坐标归一化后在此换算为像素；
 - `geass/io/terminal.py`：可见终端会话（命名管道输入 + 日志输出捕获，一键/流式两种输入方式）；
 - `geass/ocr.py`：PaddleOCR AI Studio 远程后端（提交截图 → 轮询 jobs → 下载 JSONL → 解析），输出文本 + 归一化坐标转写；
 - `geass/skills.py`：SKILL.md 加载、清单注入与按名读取；
 - `geass/asyncutil.py`：阻塞调用（OCR/终端）与事件循环之间的守护线程桥接；
 - `geass/screen.py`：屏幕抓取、缩放、JPEG 编码、帧流广播；
-- `geass/server/`：REST API、WebSocket、认证、共享状态；
+- `geass/server/`：REST API、WebSocket、认证、共享状态与 `approval.py` 人工审核网关；
 - `skills/`：用户技能目录，服务启动时扫描；
 - `scripts/remote.sh`：异地访问助手（Tailscale / cloudflared 快速隧道）；
 - `web/`：React PWA。
@@ -91,9 +92,15 @@ Geass 是一个"手机指挥电脑"的系统：
 | `POST /api/transcribe` | 上传音频 → whisper-1 转文字（需 Token） |
 | `POST /api/agent/stop` | 停止当前 Agent 任务（需 Token） |
 | `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
-| `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping`，状态事件 |
+| `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval`，状态与审核事件 |
 
 Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-WebSocket-Protocol` 子协议传递（客户端发送 `["geass", token]`），避免 token 出现在 URL 与访问日志中。
+
+安全审核协议（均走 `/ws/control`）：
+
+- 服务端 → 客户端：`approval_request {type, id, tool, command, reason, expires_in}`、`approval_resolved {type, id, approved}`；
+- 客户端 → 服务端：`approval {type, id, approved}`；
+- 服务端在有挂起请求的新客户端接入时重发 `approval_request`；先到的决定生效，`stop` 或新任务会拒绝全部挂起请求。
 
 ### 6.2 Agent 工具与坐标约定
 
@@ -122,6 +129,7 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 ## 8. 安全模型
 
 - 键鼠操作 + `open_terminal`（按模型意图在新终端窗口执行 shell 命令，无文件读写工具）；
+- **安全边界**：`open_terminal` 的非空命令先过内置黑名单（提权、递归删除、磁盘/分区、关机重启、systemctl、SIGKILL、账户、破坏性 git、下载即执行、反弹 shell、卸载软件），命中即暂停 Agent 并广播 `approval_request`，手机端允许才执行；拒绝/超时（默认 30 秒）把错误回填给模型，让其改换方式；`[security]` 可关闭或替换正则列表；
 - `read_skill` 只读取已扫描的 `SKILL.md` 与目录清单，不提供任意文件读取；技能正文只能指引 Agent 使用已有工具；
 - 局域网 + Token（**每次启动随机生成**并在控制台打印，`GEASS_TOKEN` 可显式固定）；
 - 手机端随时可停止；Agent 单任务有步数上限；
@@ -151,11 +159,13 @@ OCR 兜底：`agent.ocr`（默认开启）在文本模式下调用 PaddleOCR AI 
 LLM API Key 一样写入 `~/.geass/env.toml`（0600），可用
 `python -m geass.config set --ocr-token ...` 配置。
 
+安全边界：`security.enabled`（默认开启）、`security.approval_timeout`（默认 30 秒，最低 5 秒）、`security.patterns`（自定义黑名单正则数组，留空用内置默认、填写则整体替换）。命中规则的 `open_terminal` 命令在服务端挂起并广播 `approval_request`，手机端回 `approval` 后继续；拒绝或超时作为工具错误回填，模型可换方式或 `finish`。
+
 终端会话：`open_terminal` 弹出可见窗口并把命令输出捕获回填；`agent.terminal_timeout` 控制等待输出上限；会话可继续用 `terminal_type` 流式输入（`interval` 可模拟人类逐字速度）、`terminal_read` 监控增量输出。
 
 SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录放一份 `SKILL.md`。标准格式为 YAML frontmatter（`name`、`description`）+ Markdown 正文；启动时与每条命令开始前重新扫描，把名称与描述注入系统提示，Agent 匹配后调用 `read_skill` 获取全文。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒。
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒。
 
 ## 10. 路线图
 
@@ -177,11 +187,12 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录�
 - PaddleOCR 为可选远程服务；未配置 AI Studio Token 时非视觉模型退化为键盘-only；
 - pyautogui 逐键输入对中文 IME 支持差，中文输入建议英文文本或后续用剪贴板粘贴方案；
 - 手机经局域网 HTTP 访问时 Web Speech API 不可用（需安全上下文），自动走录音上传转写；
-- Service Worker/PWA 安装同样需要安全上下文，局域网下退化为普通网页。
+- Service Worker/PWA 安装同样需要安全上下文，局域网下退化为普通网页；
+- 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍可绕过（后续版本扩展）。
 
 ## 13. 测试与验收
 
-- 单元：坐标换算、工具映射、配置加载、帧编解码、SKILL 加载、OCR 远程 jobs 协议解析与转写、终端输出清洗；
-- 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式）；WS 认证与帧通道；
+- 单元：坐标换算、工具映射、配置加载、帧编解码、SKILL 加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决；
+- 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式，以及审核拒绝后继续循环）；WS 认证、帧通道与审核请求/响应往返；
 - 真机 E2E：实时画面、文字/语音命令完成"打开应用 + 输入文本"、停止中断、错误 token 拒绝；
 - 验收：局域网 ≥15fps、停止响应 <1s、单任务步数/费用有上限。

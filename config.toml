@@ -10,6 +10,14 @@ fps = 15
 jpeg_quality = 70
 max_width = 1920
 
+[security]
+# 安全边界：open_terminal 执行的高危 shell 命令需手机端人工审核
+enabled = true
+# 审核请求等待手机端回应的超时秒数，超时自动拒绝（最低 5 秒）
+approval_timeout = 30
+# 自定义黑名单正则（留空使用内置默认；填写后整体替换默认规则）
+patterns = []
+
 [agent]
 model = "gpt-5.6-terra"
 # OpenAI 兼容端点地址（留空表示 OpenAI 官方）；DeepSeek 填 https://api.deepseek.com

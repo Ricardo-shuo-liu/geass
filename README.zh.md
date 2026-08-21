@@ -22,7 +22,7 @@ Geass 把这个概念变成现实：**你的电脑被"施加 Geass"，手机则�
 - **PaddleOCR 兜底**：`deepseek-v4-flash` 等不支持图像的模型不再只能盲操作，屏幕会被识别为"文本 + 归一化坐标"（走 AI Studio 远程 API，无需本地安装 Paddle），仍可点击定位
 - **SKILL 接口**：自动发现 `skills/*/SKILL.md`（标准 frontmatter 格式），先看清单、需要时用 `read_skill` 渐进加载完整说明
 - **随时打断**：手机端一键停止，Agent 有步数上限，不会跑飞
-- **安全**：局域网 Token 认证，WebSocket 经子协议传递 token（不出现在 URL/日志中）；shell 仅经 `open_terminal` 工具按模型意图执行
+- **安全边界**：`open_terminal` 的高危 shell 命令先过黑名单（sudo、`rm -rf`、格式化、关机、卸载等），命中即在手机端弹审核卡，30 秒未回应自动拒绝，通过才执行；同时保留局域网 Token 认证与随时停止
 
 ## 环境要求
 
@@ -166,6 +166,9 @@ npm run build
 | `screen.fps` | `15` | 屏幕推流帧率 |
 | `screen.jpeg_quality` | `70` | 画面 JPEG 质量 |
 | `screen.max_width` | `1920` | 推流画面最大宽度 |
+| `security.enabled` | `true` | 高危 shell 命令人工审核开关 |
+| `security.approval_timeout` | `30` | 审核等待手机端回应的秒数，超时自动拒绝（最低 5 秒） |
+| `security.patterns` | 空 | 自定义黑名单正则数组；留空用内置默认，填写后整体替换默认 |
 | `agent.model` | `gpt-5.6-terra` | Agent 视觉模型（可换 `sol`/`luna`） |
 | `agent.base_url` | 空 | OpenAI 兼容端点；DeepSeek 填 `https://api.deepseek.com` |
 | `agent.vision` | `true` | 模型是否支持图像输入；不支持视觉的模型（如 `deepseek-v4-flash`）置 `false`，否则会自动降级为纯文本模式 |
@@ -198,7 +201,7 @@ npm run build
 配置按优先级合并：**环境变量 > `~/.geass/env.toml` > `config.toml` > 默认值**。
 
 - 启动时用过的 `GEASS_*` 环境变量会自动存入 `~/.geass/env.toml`（文件权限 0600），无需每次配置；
-- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；
+- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
 - 运行时接口：`GET /api/config`（脱敏查看）、`POST /api/config`（JSON 更新，如 `{"model":"...","base_url":"...","api_key":"...","vision":false}`），更新后立即生效并持久化。
 
 ## 项目结构
@@ -207,10 +210,11 @@ npm run build
 geass/
   geass/          # 后端（纯 Python）
     agent.py      # Agent 循环与 pyautogui 工具集
+    safety.py     # 高危命令黑名单策略
     ocr.py        # PaddleOCR AI Studio 远程 API 后端
     skills.py     # SKILL.md 加载器与渐进披露
     asyncutil.py  # 终端/OCR 阻塞调用的异步桥接
-    server/       # FastAPI、WebSocket、认证
+    server/       # FastAPI、WebSocket、认证、人工审核网关
     screen.py     # mss 抓屏与帧流
     io/backend.py # 输入后端抽象（PyAutoGUI 实现）
     io/terminal.py# 可见终端会话与输出捕获
@@ -238,6 +242,7 @@ cd web && npm run dev      # 前端热更新 :5173（自动代理到 8765）
 - DeepSeek 等不提供语音转写接口的端点：把 `voice.fallback_model` 留空以禁用兜底转写，手机端识别仍可用
 - pyautogui 逐键输入对中文 IME 支持差，中文输入建议英文或后续用剪贴板方案
 - 局域网 HTTP 下 Web Speech API 与 Service Worker 不可用：语音会自动走录音上传转写，PWA 退化为普通网页
+- 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍存在绕过路径，后续版本再扩展
 - 截图会发送到你配置的模型服务商（OpenAI/DeepSeek 等），敏感内容请自行规避
 
 完整设计与后续路线图见 [docs/DESIGN.md](docs/DESIGN.md)。

@@ -62,6 +62,13 @@ class AgentConfig:
 
 
 @dataclass
+class SecurityConfig:
+    enabled: bool = True
+    patterns: tuple[str, ...] = ()
+    approval_timeout: float = 30.0
+
+
+@dataclass
 class VoiceConfig:
     fallback_model: str = "whisper-1"
 
@@ -71,6 +78,7 @@ class Config:
     server: ServerConfig = field(default_factory=ServerConfig)
     screen: ScreenConfig = field(default_factory=ScreenConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     config_path: Path = field(default=DEFAULT_CONFIG_PATH)
     api_key: str = ""
@@ -94,7 +102,7 @@ def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
 
 def _dump_toml(data: dict[str, Any]) -> str:
     lines: list[str] = []
-    for section in ("server", "screen", "agent", "voice"):
+    for section in ("server", "screen", "agent", "security", "voice"):
         items = data.get(section)
         if not isinstance(items, dict) or not items:
             continue
@@ -104,6 +112,9 @@ def _dump_toml(data: dict[str, Any]) -> str:
                 rendered = "true" if value else "false"
             elif isinstance(value, (int, float)):
                 rendered = str(value)
+            elif isinstance(value, (list, tuple)):
+                items_ = ", ".join(json.dumps(str(item)) for item in value)
+                rendered = f"[{items_}]"
             else:
                 rendered = json.dumps(str(value))
             lines.append(f"{key} = {rendered}")
@@ -150,8 +161,10 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     p_server = _section(project, "server")
     p_screen = _section(project, "screen")
     p_agent = _section(project, "agent")
+    p_security = _section(project, "security")
     p_voice = _section(project, "voice")
     u_agent = _section(user, "agent")
+    u_security = _section(user, "security")
 
     def pick(section: dict[str, Any], key: str, default: Any) -> Any:
         return section.get(key, default)
@@ -224,6 +237,28 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
         ),
     )
     skills_dir = str(pick(u_agent, "skills_dir", pick(p_agent, "skills_dir", "skills")))
+    security_enabled = bool(
+        pick(u_security, "enabled", pick(p_security, "enabled", True))
+    )
+    security_timeout = max(
+        5.0,
+        float(
+            pick(
+                u_security,
+                "approval_timeout",
+                pick(p_security, "approval_timeout", 30.0),
+            )
+        ),
+    )
+    security_patterns_value = pick(
+        u_security, "patterns", pick(p_security, "patterns", [])
+    )
+    if isinstance(security_patterns_value, (list, tuple)):
+        security_patterns = tuple(
+            str(item) for item in security_patterns_value if str(item).strip()
+        )
+    else:
+        security_patterns = ()
 
     config = Config(
         server=ServerConfig(
@@ -249,6 +284,11 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             ocr_timeout=ocr_timeout,
             terminal_timeout=terminal_timeout,
             skills_dir=skills_dir,
+        ),
+        security=SecurityConfig(
+            enabled=security_enabled,
+            patterns=security_patterns,
+            approval_timeout=security_timeout,
         ),
         voice=VoiceConfig(
             fallback_model=str(pick(p_voice, "fallback_model", "whisper-1")),
@@ -331,6 +371,14 @@ def main() -> None:
         help="PaddleOCR 服务端点（默认 https://paddleocr.aistudio-app.com）",
     )
     set_parser.add_argument("--skills-dir", help="SKILL 目录（默认项目下 skills）")
+    set_parser.add_argument(
+        "--security-enabled",
+        choices=["true", "false"],
+        help="是否启用高危 shell 命令审核",
+    )
+    set_parser.add_argument(
+        "--approval-timeout", type=float, help="命令审核超时秒数（最低 5 秒）"
+    )
 
     args = parser.parse_args()
     if args.command == "show":
@@ -344,10 +392,16 @@ def main() -> None:
         print(f"skills    = {config.agent.skills_dir}")
         print(f"api_key   = {mask_secret(config.api_key) or '（未设置）'}")
         print(f"ocr_token = {mask_secret(config.agent.ocr_token) or '（未设置）'}")
+        print(
+            "security  = "
+            f"enabled={config.security.enabled}, "
+            f"timeout={config.security.approval_timeout:.0f}s, "
+            f"patterns={len(config.security.patterns)}"
+        )
         print("token     = 每次启动随机生成（启动时在控制台打印）")
         return
 
-    updates: dict[str, dict[str, Any]] = {"agent": {}}
+    updates: dict[str, dict[str, Any]] = {"agent": {}, "security": {}}
     positional_keys = ("api_key", "base_url", "model")
     for index, value in enumerate(args.values):
         if index < len(positional_keys) and value:
@@ -370,7 +424,13 @@ def main() -> None:
         updates["agent"]["ocr_base_url"] = args.ocr_base_url
     if args.skills_dir:
         updates["agent"]["skills_dir"] = args.skills_dir
-    if not updates["agent"]:
+    if args.security_enabled is not None:
+        updates["security"]["enabled"] = args.security_enabled == "true"
+    if args.approval_timeout is not None:
+        updates["security"]["approval_timeout"] = max(
+            5.0, float(args.approval_timeout)
+        )
+    if not updates["agent"] and not updates["security"]:
         parser.error("请至少提供一个 --xxx 参数")
     path = save_user_env(updates)
     print(f"已写入 {path}")

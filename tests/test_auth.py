@@ -164,3 +164,30 @@ def test_config_endpoint_updates_and_persists(monkeypatch, tmp_path):
     assert after["vision"] is False
     assert after["api_configured"] is True
     assert (tmp_path / "home" / ".geass" / "env.toml").exists()
+
+
+def test_config_endpoint_updates_security(monkeypatch, tmp_path):
+    monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
+    app = build_app()
+
+    async def run():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            headers = {"X-GEASS-Token": TOKEN}
+            before = await client.get("/api/config", headers=headers)
+            response = await client.post(
+                "/api/config",
+                headers=headers,
+                json={"security_enabled": False, "approval_timeout": 60},
+            )
+            return before.json(), response.status_code, response.json()
+
+    before, status, after = asyncio.run(run())
+    assert before["security_enabled"] is True
+    assert before["security_approval_timeout"] == 30.0
+    assert before["security_patterns_count"] > 0
+    assert status == 200
+    assert after["security_enabled"] is False
+    assert after["security_approval_timeout"] == 60.0

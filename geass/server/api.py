@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from ..config import load_config, mask_secret, save_user_env
+from ..safety import default_patterns
 from .auth import require_token
 from .state import reload_state
 
@@ -20,6 +21,8 @@ class ConfigUpdate(BaseModel):
     ocr_token: str | None = None
     ocr_model: str | None = None
     ocr_base_url: str | None = None
+    security_enabled: bool | None = None
+    approval_timeout: float | None = None
 
 
 def config_summary(state) -> dict[str, Any]:
@@ -36,6 +39,11 @@ def config_summary(state) -> dict[str, Any]:
         "api_key": mask_secret(state.config.api_key),
         "api_configured": bool(state.client),
         "voice_fallback_model": state.config.voice.fallback_model,
+        "security_enabled": state.config.security.enabled,
+        "security_approval_timeout": state.config.security.approval_timeout,
+        "security_patterns_count": len(
+            state.config.security.patterns or default_patterns()
+        ),
     }
 
 
@@ -70,7 +78,7 @@ def register(app) -> None:
     @router.post("/api/config", dependencies=[Depends(require_token)])
     async def update_config(request: Request, payload: ConfigUpdate):
         state = request.app.state.geass
-        updates: dict[str, dict[str, Any]] = {"agent": {}}
+        updates: dict[str, dict[str, Any]] = {"agent": {}, "security": {}}
         for key in ("model", "base_url", "api_key"):
             value = getattr(payload, key)
             if value:
@@ -83,7 +91,13 @@ def register(app) -> None:
             updates["agent"]["vision"] = payload.vision
         if payload.ocr is not None:
             updates["agent"]["ocr"] = payload.ocr
-        if not updates["agent"]:
+        if payload.security_enabled is not None:
+            updates["security"]["enabled"] = payload.security_enabled
+        if payload.approval_timeout is not None:
+            updates["security"]["approval_timeout"] = max(
+                5.0, float(payload.approval_timeout)
+            )
+        if not updates["agent"] and not updates["security"]:
             raise HTTPException(status_code=400, detail="没有可更新的字段")
 
         save_user_env(updates)
