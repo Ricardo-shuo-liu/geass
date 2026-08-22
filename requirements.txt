@@ -5,6 +5,11 @@ websockets>=12
 mss>=9.0
 Pillow>=10.0
 pyautogui>=0.9.54
+pyperclip>=1.8
+# pyatspi 是 Linux 发行版包，不发布到 PyPI/conda-forge，不能用 pip 安装。
+# 需要 find_element 时请安装系统包：
+#   Ubuntu/Debian: sudo apt install python3-pyatspi
+#   Fedora:        sudo dnf install python3-pyatspi
 openai>=1.40
 pydantic>=2.7
 tomli>=2.0

@@ -302,3 +302,52 @@ def test_security_empty_patterns_fall_back_to_defaults(tmp_path):
     config = load_config(project)
 
     assert config.security.patterns == ()
+
+
+def test_vision_whitelist_defaults_empty(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+
+    config = load_config(project)
+
+    assert config.agent.vision_whitelist == ()
+
+
+def test_vision_whitelist_from_file(tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text(
+        '[agent]\nvision_whitelist = ["gpt-5.6-terra", "sol"]\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(project)
+
+    assert config.agent.vision_whitelist == ("gpt-5.6-terra", "sol")
+
+
+def test_vision_whitelist_from_env(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GEASS_VISION_WHITELIST", "gpt-5.6-terra, sol")
+
+    config = load_config(project)
+
+    assert config.agent.vision_whitelist == ("gpt-5.6-terra", "sol")
+
+
+def test_vision_whitelist_user_env_overrides_project(monkeypatch, tmp_path):
+    project = tmp_path / "config.toml"
+    project.write_text(
+        '[agent]\nvision_whitelist = ["gpt-5.6-terra"]\n', encoding="utf-8"
+    )
+    home = tmp_path / "home"
+    monkeypatch.setenv("GEASS_HOME", str(home))
+    user_env = home / ".geass" / "env.toml"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text(
+        '[agent]\nvision_whitelist = ["sol", "luna"]\n', encoding="utf-8"
+    )
+
+    config = load_config(project)
+
+    assert config.agent.vision_whitelist == ("sol", "luna")

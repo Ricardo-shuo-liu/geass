@@ -112,7 +112,7 @@ def reload_state(state: AppState, config: Config) -> None:
     state.client = client
     state.agent.client = client
     state.agent.config = config.agent
-    state.agent.vision = config.agent.vision
+    state.agent.vision = state.agent.resolve_vision()
     state.agent.ocr_checked = False
     state.agent.ocr_ready = False
     state.agent.ocr = (

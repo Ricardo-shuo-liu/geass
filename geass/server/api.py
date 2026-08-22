@@ -21,6 +21,7 @@ class ConfigUpdate(BaseModel):
     ocr_token: str | None = None
     ocr_model: str | None = None
     ocr_base_url: str | None = None
+    vision_whitelist: str | None = None
     security_enabled: bool | None = None
     approval_timeout: float | None = None
 
@@ -39,6 +40,7 @@ def config_summary(state) -> dict[str, Any]:
         "api_key": mask_secret(state.config.api_key),
         "api_configured": bool(state.client),
         "voice_fallback_model": state.config.voice.fallback_model,
+        "vision_whitelist": list(state.config.agent.vision_whitelist),
         "security_enabled": state.config.security.enabled,
         "security_approval_timeout": state.config.security.approval_timeout,
         "security_patterns_count": len(
@@ -91,6 +93,12 @@ def register(app) -> None:
             updates["agent"]["vision"] = payload.vision
         if payload.ocr is not None:
             updates["agent"]["ocr"] = payload.ocr
+        if payload.vision_whitelist is not None:
+            updates["agent"]["vision_whitelist"] = [
+                item.strip()
+                for item in payload.vision_whitelist.split(",")
+                if item.strip()
+            ]
         if payload.security_enabled is not None:
             updates["security"]["enabled"] = payload.security_enabled
         if payload.approval_timeout is not None:

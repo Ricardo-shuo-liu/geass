@@ -17,6 +17,7 @@ Geass 把这个概念变成现实：**你的电脑被"施加 Geass"，手机则�
 - **文字命令**：聊天式输入，例如"打开记事本并输入 hello world"
 - **语音命令**：手机端 Web Speech API 直接识别；效果不佳或不可用时自动录音上传，由 whisper-1 兜底转写
 - **视觉 Agent**：自建"截图 → 视觉模型 → 执行 → 再看结果"循环，能看懂界面、逐步骤操作
+- **语义定位**：`find_text` 用 PaddleOCR 反查文本中心坐标、`find_element` 用 Linux AT-SPI 无障碍树查控件坐标，模型按名称定位后再点击，减少凭截图猜坐标的误差
 - **pyautogui 工具集**：移动、单击、双击、右键、滚动、拖动、键盘输入、组合键、等待、截图、结束任务
 - **可见终端**：弹出真实终端窗口，可一键执行命令，也可像人一样逐字流式输入，并捕获/监控输出（如 `echo "hello world"`）
 - **PaddleOCR 兜底**：`deepseek-v4-flash` 等不支持图像的模型不再只能盲操作，屏幕会被识别为"文本 + 归一化坐标"（走 AI Studio 远程 API，无需本地安装 Paddle），仍可点击定位
@@ -30,16 +31,65 @@ Geass 把这个概念变成现实：**你的电脑被"施加 Geass"，手机则�
 - conda 环境 `geass`（Python 3.10）
 - 任意 **OpenAI 兼容**的模型 API（OpenAI / DeepSeek / 本地 ollama 等）：需 `API Key`
 - **PaddleOCR AI Studio Token**（可选，给非视觉模型用）：见下方[配置 OCR Token](#配置-ocr-token)
+- **pyatspi**（可选，Linux）：`find_element` 控件定位需要，缺失时该工具自动返回不可用（Ubuntu/Debian 用 `sudo apt install python3-pyatspi`，**不是 pip/conda 包**）
 - Node.js 18+ —— **可选**：前端已经构建好（`web/dist`），只有修改前端时才需要
 
 ## 运行方法
 
 ### 1. 安装依赖
 
+最简单的方式是运行仓库自带的一键安装脚本：
+
+```bash
+./scripts/install.sh
+
+# 连 Linux 系统依赖一起装（会调用 sudo，按需输入密码）
+./scripts/install.sh --all
+```
+
+`scripts/install.sh` 会按 `geass.yml` 创建或更新 conda 环境 `geass`，然后用
+`pip install -e .` 安装项目本体，最后运行环境自检。`--all` 额外安装
+`util-linux`、`xclip/xsel`、`python3-pyatspi` 等系统包，以及 `web/` 的
+npm 依赖；只需要其中一部分时可分别用 `--system` / `--web`。自定义环境名
+用 `./scripts/install.sh --name myenv`，保留已有环境中的额外包用 `--no-prune`。
+
+从一台新机器开始，可以先用 `scripts/setup.sh` clone 仓库再安装：
+
+```bash
+./scripts/setup.sh --all
+```
+
+`setup.sh` 默认直接配置当前仓库；若不在仓库内，则会 clone 到
+`~/geass`（可用 `--dir` 指定位置）。尚未下载仓库时，可先取脚本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ricardo-shuo-liu/geass/master/scripts/setup.sh \
+  -o /tmp/geass-setup.sh
+bash /tmp/geass-setup.sh --all
+```
+
+如果不想用脚本，也可以手动安装：
+
 ```bash
 conda activate geass
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+`pyatspi` 不发布到 PyPI/conda-forge，不能用 pip 安装。它由 Linux 发行版
+提供，`find_element` 需要时用发行版包管理器安装即可：
+
+```bash
+# Ubuntu/Debian
+sudo apt install python3-pyatspi
+
+# Fedora
+sudo dnf install python3-pyatspi
+```
+
+装到系统 Python 后服务会自动兼容，无需再装进 conda 环境；如果 conda
+Python 与系统 Python 的版本不同，`find_element` 会自动改用系统 Python
+桥接查询。没有安装时 `find_element` 会自动返回「不可用」，`find_text`
+等其他定位方式不受影响。
 
 也可以直接用仓库自带的 `geass.yml` 一键重建完整环境（Python 3.10、Linux
 x86_64，已锁定全部第三方依赖版本）——这是把项目交给别人时最省事的方式：
@@ -100,7 +150,7 @@ Token 写入 `~/.geass/env.toml`（权限 0600），不进仓库。等价环境�
 ### 4. 启动服务
 
 ```bash
-./run.sh
+./scripts/run.sh
 ```
 
 启动后控制台会打印：
@@ -172,6 +222,7 @@ npm run build
 | `agent.model` | `gpt-5.6-terra` | Agent 视觉模型（可换 `sol`/`luna`） |
 | `agent.base_url` | 空 | OpenAI 兼容端点；DeepSeek 填 `https://api.deepseek.com` |
 | `agent.vision` | `true` | 模型是否支持图像输入；不支持视觉的模型（如 `deepseek-v4-flash`）置 `false`，否则会自动降级为纯文本模式 |
+| `agent.vision_whitelist` | 空 | 支持图像输入的模型白名单（逗号分隔）；填写后以白名单为准：模型在名单内直接发截图，不在名单内自动与 PaddleOCR 配对 |
 | `agent.ocr` | `true` | 非视觉模型是否启用 PaddleOCR（远程 API），把屏幕识别为文本 + 归一化坐标 |
 | `agent.ocr_token` | 空 | AI Studio 访问 Token；用 `python -m geass.config set --ocr-token ...` 设置 |
 | `agent.ocr_model` | `PaddleOCR-VL-1.6` | OCR 模型：`PaddleOCR-VL-1.6` 或 `PP-StructureV3` |
@@ -190,6 +241,7 @@ npm run build
 | `GEASS_API_KEY` | API Key |
 | `GEASS_BASE_URL` | 覆盖 `agent.base_url` |
 | `GEASS_MODEL` | 覆盖 `agent.model` |
+| `GEASS_VISION_WHITELIST` | 逗号分隔的视觉模型白名单，覆盖 `agent.vision_whitelist` |
 | `GEASS_TOKEN` | 可选：固定 Token（否则每次启动随机） |
 | `GEASS_PADDLEOCR_TOKEN` | AI Studio OCR Token（兼容回退 `PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN`） |
 | `GEASS_PADDLEOCR_MODEL` | 覆盖 `agent.ocr_model` |
@@ -201,7 +253,7 @@ npm run build
 配置按优先级合并：**环境变量 > `~/.geass/env.toml` > `config.toml` > 默认值**。
 
 - 启动时用过的 `GEASS_*` 环境变量会自动存入 `~/.geass/env.toml`（文件权限 0600），无需每次配置；
-- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
+- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；视觉白名单：`--vision-whitelist gpt-5.6-terra,sol`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
 - 运行时接口：`GET /api/config`（脱敏查看）、`POST /api/config`（JSON 更新，如 `{"model":"...","base_url":"...","api_key":"...","vision":false}`），更新后立即生效并持久化。
 
 ## 项目结构
@@ -211,26 +263,35 @@ geass/
   geass/          # 后端（纯 Python）
     agent.py      # Agent 循环与 pyautogui 工具集
     safety.py     # 高危命令黑名单策略
+    check.py      # 环境自检命令（python -m geass.check）
     ocr.py        # PaddleOCR AI Studio 远程 API 后端
     skills.py     # SKILL.md 加载器与渐进披露
     asyncutil.py  # 终端/OCR 阻塞调用的异步桥接
     server/       # FastAPI、WebSocket、认证、人工审核网关
     screen.py     # mss 抓屏与帧流
     io/backend.py # 输入后端抽象（PyAutoGUI 实现）
+    io/accessibility.py # Linux AT-SPI 控件查找（find_element）
     io/terminal.py# 可见终端会话与输出捕获
   skills/         # 用户提供的 SKILL.md 技能（见 skills/README.md）
   web/            # React PWA（手机端薄壳）
   docs/DESIGN.md  # 完整设计文档与路线图
   config.toml     # 配置文件
   geass.yml       # 锁定的 conda 环境（给他人一键安装用）
+  scripts/
+    setup.sh      # clone 仓库并调用 install.sh 配置环境
+    install.sh    # 按 geass.yml 一键安装/更新依赖
+    run.sh        # 启动服务
+    run_tests.sh  # 运行全部测试
+    remote.sh     # Tailscale/Cloudflare 异地访问助手
 ```
 
 ## 开发与测试
 
 ```bash
 pytest                     # 自动发现并运行 tests/ 下全部用例（见 pytest.ini）
-./run_tests.sh             # 运行全部测试并把完整输出（含报错）记录到 test.log
+./scripts/run_tests.sh     # 运行全部测试并把完整输出（含报错）记录到 test.log
 python -m geass.main       # 后端 :8765
+python -m geass.check      # 检查环境与配置是否就绪（密钥只显示是否配置）
 cd web && npm run dev      # 前端热更新 :5173（自动代理到 8765）
 ```
 
@@ -240,9 +301,10 @@ cd web && npm run dev      # 前端热更新 :5173（自动代理到 8765）
 - 不支持视觉输入的模型（如 `deepseek-v4-flash`）：配置好 PaddleOCR AI Studio Token 就能拿到屏幕文本 + 文本框中心坐标，保留鼠标点击能力；没有 OCR 时才退化为键盘-only 工具
 - PaddleOCR 截图会上传到 AI Studio API，需要自行配置 Token
 - DeepSeek 等不提供语音转写接口的端点：把 `voice.fallback_model` 留空以禁用兜底转写，手机端识别仍可用
-- pyautogui 逐键输入对中文 IME 支持差，中文输入建议英文或后续用剪贴板方案
+- 中文等非 ASCII 文本自动改走剪贴板粘贴；Linux 下需要 `xclip`/`xsel` 之一，缺失时退回逐键输入（IME 支持差）
 - 局域网 HTTP 下 Web Speech API 与 Service Worker 不可用：语音会自动走录音上传转写，PWA 退化为普通网页
 - 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍存在绕过路径，后续版本再扩展
+- `find_element` 依赖 Linux 的 AT-SPI 无障碍树；Electron 或自绘界面的应用可能不暴露控件，找不到时退回截图估计坐标
 - 截图会发送到你配置的模型服务商（OpenAI/DeepSeek 等），敏感内容请自行规避
 
 完整设计与后续路线图见 [docs/DESIGN.md](docs/DESIGN.md)。

@@ -70,7 +70,10 @@ Geass 是一个"手机指挥电脑"的系统：
 
 - `geass/paisley_park/` 对应实现中的 `geass/agent.py` + `geass/server/`：Agent 循环、协议、编排；
 - `geass/safety.py`：高危 shell 命令黑名单策略（不区分大小写正则匹配，返回是否拦截与原因）；
+- `geass/check.py`：`python -m geass.check` 环境自检（密钥只显示是否配置）；
 - `geass/io/backend.py`：InputBackend 抽象与 PyAutoGUI 实现，坐标归一化后在此换算为像素；
+- `geass/io/accessibility.py`：Linux AT-SPI 无障碍树控件查找（供 `find_element` 使用）；conda Python 缺少兼容的 `gi/PyGObject` 时自动切换 `_atspi_bridge.py` 的系统 Python 桥接；
+- `geass/io/_atspi_bridge.py`：独立 AT-SPI 桥接脚本，只依赖标准库和系统 Python 自带的 `pyatspi`；
 - `geass/io/terminal.py`：可见终端会话（命名管道输入 + 日志输出捕获，一键/流式两种输入方式）；
 - `geass/ocr.py`：PaddleOCR AI Studio 远程后端（提交截图 → 轮询 jobs → 下载 JSONL → 解析），输出文本 + 归一化坐标转写；
 - `geass/skills.py`：SKILL.md 加载、清单注入与按名读取；
@@ -78,6 +81,9 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/screen.py`：屏幕抓取、缩放、JPEG 编码、帧流广播；
 - `geass/server/`：REST API、WebSocket、认证、共享状态与 `approval.py` 人工审核网关；
 - `skills/`：用户技能目录，服务启动时扫描；
+- `scripts/setup.sh`：初始化入口，必要时 clone 仓库后交给 `install.sh`；
+- `scripts/install.sh`：按 `geass.yml` 创建/更新 conda 环境、安装项目本体，可顺带安装系统依赖与 web/npm 依赖；
+- `scripts/run.sh` / `scripts/run_tests.sh`：启动服务 / 运行测试；
 - `scripts/remote.sh`：异地访问助手（Tailscale / cloudflared 快速隧道）；
 - `web/`：React PWA。
 
@@ -106,6 +112,8 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 
 - 坐标一律为 0–1 归一化值，相对当前截图的左上角；服务端按真实分辨率换算，截图缩放不影响定位；
 - 工具 schema 见 `geass/agent.py` 的 `TOOLS`，动作命名对齐 OpenAI computer-use 词表，便于未来迁移；
+- 键鼠经 `InputBackend` 落到 pyautogui：ASCII 逐键输入，中文等非 ASCII 文本走剪贴板粘贴（Linux 需要 `xclip`/`xsel`），按键名有跨平台别名归一化；
+- 语义定位工具：`find_text`（PaddleOCR 反查文本，返回文本框中心归一化坐标）、`find_element`（AT-SPI 按控件名/角色查找，返回控件中心归一化坐标）；系统提示要求「点击前先用语义定位拿坐标、能用键盘就用键盘」，避免模型凭空估计坐标；
 - 终端工具：`open_terminal`（开窗 + 一键命令，返回 `session_id`/`output`）、`terminal_type`（流式输入）、`terminal_read`（读取新输出）、`terminal_close`（关闭会话）；
 - 技能工具：`list_skills`（清单）、`read_skill`（按名加载正文与附带文件），符合渐进披露；
 - 系统提示固定规则：每次动作后重新观察截图、只做任务范围内操作、完成时调用 `finish`。
@@ -142,13 +150,14 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 - `GEASS_API_KEY`：API Key；
 - `GEASS_BASE_URL`：OpenAI 兼容端点（DeepSeek 填 `https://api.deepseek.com`）；
 - `GEASS_MODEL`：模型名；
+- `GEASS_VISION_WHITELIST`：逗号分隔的视觉模型白名单（覆盖 `agent.vision_whitelist`）；
 - `GEASS_TOKEN`：可选，显式固定 Token（默认每次启动随机生成）；
 - `GEASS_PADDLEOCR_TOKEN` / `GEASS_PADDLEOCR_MODEL` / `GEASS_PADDLEOCR_BASE_URL`：AI Studio OCR Token（兼容回退 `PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN`）、模型与端点；
 - `GEASS_CONFIG` / `GEASS_HOME`：项目配置文件路径 / 用户配置目录（默认 `~/.geass`）。
 
 持久化：启动时用过的 `GEASS_*` 环境变量会自动写入 `~/.geass/env.toml`（权限 0600），避免每次重复配置（Token 除外，每次启动随机）；也可通过 `python -m geass.config set/show` 或 `GET/POST /api/config` 管理（运行时热更新）。
 
-视觉兼容：`agent.vision` 控制是否给模型发截图。不支持图像输入的模型（如部分 DeepSeek）会在首次收到 400（`unknown variant image_url`）时自动降级为文本模式：只保留键盘类工具，并持久化 `vision=false`。
+视觉兼容：`agent.vision` 控制是否给模型发截图；`agent.vision_whitelist`（或 `GEASS_VISION_WHITELIST`）填写后优先于 `vision`：当前模型在名单内才发截图，不在名单内的模型自动走文本模式并与 PaddleOCR 配对。白名单为空时回退到 `vision` 布尔开关。不支持图像输入的模型（如部分 DeepSeek）仍会在首次收到 400（`unknown variant image_url`）时自动降级为文本模式并持久化 `vision=false`。
 
 OCR 兜底：`agent.ocr`（默认开启）在文本模式下调用 PaddleOCR AI Studio
 远程 jobs API（`agent.ocr_base_url` + `agent.ocr_token`，模型
@@ -165,7 +174,7 @@ LLM API Key 一样写入 `~/.geass/env.toml`（0600），可用
 
 SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录放一份 `SKILL.md`。标准格式为 YAML frontmatter（`name`、`description`）+ Markdown 正文；启动时与每条命令开始前重新扫描，把名称与描述注入系统提示，Agent 匹配后调用 `read_skill` 获取全文。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒。
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒。
 
 ## 10. 路线图
 
@@ -185,14 +194,15 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录�
 - 仅支持 Linux X11（当前实现）；Windows/macOS/Wayland 待适配；
 - 可见终端优先经 `x-terminal-emulator`（gnome-terminal 显式加 `--wait`，避免 dbus 激活导致客户端立即退出被误判为失败）；启动窗口时会剔除继承的 snap GTK 环境变量——从 VS Code（snap 版）集成终端启动服务时，`GTK_PATH` 等会让 gnome-terminal 加载 snap 的 GTK 模块，把 `/snap/core20` 库路径注入链接器搜索路径，导致 `__libc_pthread_init / GLIBC_PRIVATE` 崩溃；命令完成检测默认用交互式 bash 的 `PROMPT_COMMAND` 写独立边带文件（窗口里不出现 `GEASS_P1=...` 之类的内部哨兵），无 bash 时退回 sentinel 方式；输出捕获依赖 Linux 下的 `script`（无 `script` 时用 `tee` 兜底，交互式程序体验会下降）；macOS/Windows 当前仍走旧的“只开窗、不捕获”路径；
 - PaddleOCR 为可选远程服务；未配置 AI Studio Token 时非视觉模型退化为键盘-only；
-- pyautogui 逐键输入对中文 IME 支持差，中文输入建议英文文本或后续用剪贴板粘贴方案；
+- 中文等非 ASCII 输入走剪贴板粘贴，Linux 依赖 `xclip`/`xsel`；缺失时退回逐键输入，IME 支持差；
 - 手机经局域网 HTTP 访问时 Web Speech API 不可用（需安全上下文），自动走录音上传转写；
 - Service Worker/PWA 安装同样需要安全上下文，局域网下退化为普通网页；
 - 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍可绕过（后续版本扩展）。
+- `find_element` 依赖 Linux 的 AT-SPI；Electron/自绘应用可能不暴露控件树，找不到时模型退回截图估计坐标；Ubuntu/Debian 的 `python3-pyatspi` 需由 apt 安装（不是 pip 包），当 conda 环境的 Python 版本与系统 Python 不同时，会经系统 Python 桥接进程查询。
 
 ## 13. 测试与验收
 
-- 单元：坐标换算、工具映射、配置加载、帧编解码、SKILL 加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决；
+- 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、SKILL 加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检；
 - 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式，以及审核拒绝后继续循环）；WS 认证、帧通道与审核请求/响应往返；
 - 真机 E2E：实时画面、文字/语音命令完成"打开应用 + 输入文本"、停止中断、错误 token 拒绝；
 - 验收：局域网 ≥15fps、停止响应 <1s、单任务步数/费用有上限。

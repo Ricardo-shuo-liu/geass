@@ -17,6 +17,7 @@ Geass turns that fantasy into reality: **your PC is placed under a Geass, and yo
 - **Text commands** — chat-style input, e.g. "open notepad and type hello world"
 - **Voice commands** — on-device Web Speech API first, falls back to recorded audio + whisper-1 transcription
 - **Vision Agent** — a "screenshot → vision model → act → observe again" loop that reads the UI and operates step by step
+- **Semantic grounding** — `find_text` resolves text to its center coordinates via PaddleOCR, and `find_element` resolves controls via the Linux AT-SPI accessibility tree, so the model clicks by name instead of guessing pixel positions
 - **pyautogui toolkit** — move, click, double-click, right-click, scroll, drag, type, key combos, wait, screenshot, finish
 - **Visible terminal** — opens a real terminal window, runs a command in one shot or types into it like a human (streamed input), and captures/monitors the output (e.g. `echo "hello world"`)
 - **PaddleOCR fallback** — models without vision input (e.g. `deepseek-v4-flash`) read the screen as text + normalized box coordinates (via the AI Studio remote API, no local Paddle install) instead of degrading to keyboard-only
@@ -30,16 +31,70 @@ Geass turns that fantasy into reality: **your PC is placed under a Geass, and yo
 - conda env `geass` (Python 3.10)
 - Any **OpenAI-compatible** model API (OpenAI / DeepSeek / local ollama…) with an `API Key`
 - **PaddleOCR AI Studio token** (optional, for non-vision models) — see [Configure OCR token](#configure-ocr-token)
+- **pyatspi** (optional, Linux) — needed by the `find_element` tool; it reports itself unavailable when missing (install with `sudo apt install python3-pyatspi` on Ubuntu/Debian; it is **not a pip/conda package**)
 - Node.js 18+ — **optional** (the frontend is prebuilt in `web/dist`; only needed to modify it)
 
 ## Getting Started
 
 ### 1. Install dependencies
 
+The easiest path is the included one-shot installer:
+
+```bash
+./scripts/install.sh
+
+# also install Linux system packages (invokes sudo and may prompt for a password)
+./scripts/install.sh --all
+```
+
+`scripts/install.sh` creates or updates the `geass` conda environment from `geass.yml`,
+installs the project itself with `pip install -e .`, and runs the environment
+check. `--all` additionally installs system packages such as `util-linux`,
+`xclip/xsel` and `python3-pyatspi`, plus the `web/` npm dependencies; use
+`--system` or `--web` for just one part. Pass `--name myenv` for a custom
+environment name or `--no-prune` to keep extra packages already in the env.
+
+On a fresh machine, `scripts/setup.sh` can clone the repository and then run
+the installer:
+
+```bash
+./scripts/setup.sh --all
+```
+
+`setup.sh` configures the current repository when it is already inside one;
+otherwise it clones to `~/geass` (override with `--dir`). Before the repository
+exists anywhere on the machine, fetch the script first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ricardo-shuo-liu/geass/master/scripts/setup.sh \
+  -o /tmp/geass-setup.sh
+bash /tmp/geass-setup.sh --all
+```
+
+If you prefer to install manually:
+
 ```bash
 conda activate geass
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
+
+`pyatspi` is not published on PyPI or conda-forge, so it cannot be installed
+with pip. It is provided by the Linux distribution, and is only needed by
+`find_element`:
+
+```bash
+# Ubuntu/Debian
+sudo apt install python3-pyatspi
+
+# Fedora
+sudo dnf install python3-pyatspi
+```
+
+Once installed into the system Python, Geass loads it automatically, so it does
+not need to be installed into the conda environment. When the conda Python
+version differs from the system Python, `find_element` transparently switches to
+a system-Python bridge for the query. Without it, `find_element` reports itself
+as unavailable while `find_text` and the other tools keep working.
 
 Or recreate the whole pinned environment (Python 3.10, Linux x86_64) from the
 included `geass.yml` in one shot — the easiest way to hand this to someone else:
@@ -103,7 +158,7 @@ alternative way to obtain the token, but the runtime does not depend on MCP.
 ### 4. Start the server
 
 ```bash
-./run.sh
+./scripts/run.sh
 ```
 
 The console prints:
@@ -179,6 +234,7 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `agent.model` | `gpt-5.6-terra` | Vision model (e.g. `sol` / `luna`) |
 | `agent.base_url` | empty | OpenAI-compatible endpoint; DeepSeek: `https://api.deepseek.com` |
 | `agent.vision` | `true` | Whether the model accepts images; non-vision models auto-degrade to text mode |
+| `agent.vision_whitelist` | empty | Whitelist of vision-capable models (comma-separated); when set, a model on the list gets screenshots, anything else is automatically paired with PaddleOCR |
 | `agent.ocr` | `true` | Use PaddleOCR (remote API) to transcribe the screen for non-vision models (text + normalized box coordinates) |
 | `agent.ocr_token` | empty | AI Studio access token; set via `python -m geass.config set --ocr-token ...` |
 | `agent.ocr_model` | `PaddleOCR-VL-1.6` | OCR model: `PaddleOCR-VL-1.6` or `PP-StructureV3` |
@@ -197,6 +253,7 @@ Environment variables:
 | `GEASS_API_KEY` | API key |
 | `GEASS_BASE_URL` | Overrides `agent.base_url` |
 | `GEASS_MODEL` | Overrides `agent.model` |
+| `GEASS_VISION_WHITELIST` | Comma-separated vision-model whitelist; overrides `agent.vision_whitelist` |
 | `GEASS_TOKEN` | Optional: pin the Token (otherwise random per startup) |
 | `GEASS_PADDLEOCR_TOKEN` | AI Studio OCR token (falls back to `PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN`) |
 | `GEASS_PADDLEOCR_MODEL` | Overrides `agent.ocr_model` |
@@ -208,7 +265,7 @@ Environment variables:
 Precedence: **env vars > `~/.geass/env.toml` > `config.toml` > defaults**.
 
 - `GEASS_*` env vars used at startup are auto-saved to `~/.geass/env.toml` (mode 0600);
-- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; safety: `--security-enabled false` / `--approval-timeout 60`;
+- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; vision whitelist: `--vision-whitelist gpt-5.6-terra,sol`; safety: `--security-enabled false` / `--approval-timeout 60`;
 - Runtime API: `GET /api/config` (masked) and `POST /api/config` (e.g. `{"model":"...","base_url":"...","api_key":"...","vision":false}`) — applied and persisted immediately.
 
 ## Project layout
@@ -218,26 +275,35 @@ geass/
   geass/          # backend (pure Python)
     agent.py      # Agent loop + pyautogui toolkit
     safety.py     # high-risk command blocklist policy
+    check.py      # environment readiness check (python -m geass.check)
     ocr.py        # PaddleOCR AI Studio remote API backend
     skills.py     # SKILL.md loader + progressive disclosure
     asyncutil.py  # non-blocking bridge for terminal/OCR calls
     server/       # FastAPI, WebSocket, auth, approval gateway
     screen.py     # mss capture + frame streaming
     io/backend.py # input backend abstraction (PyAutoGUI)
+    io/accessibility.py # Linux AT-SPI control lookup (find_element)
     io/terminal.py# visible terminal sessions + output capture
   skills/         # user-provided SKILL.md skills (see skills/README.md)
   web/            # React PWA (thin phone client)
   docs/DESIGN.md  # full design & roadmap
   config.toml     # config file
   geass.yml       # frozen conda environment (one-shot setup for others)
+  scripts/
+    setup.sh      # clone the repo, then run install.sh
+    install.sh    # one-shot install/update based on geass.yml
+    run.sh        # start the server
+    run_tests.sh  # run all tests
+    remote.sh     # Tailscale/Cloudflare remote-access helper
 ```
 
 ## Development
 
 ```bash
 pytest                     # auto-discovers all tests under tests/ (see pytest.ini)
-./run_tests.sh             # run all tests, log full output to test.log
+./scripts/run_tests.sh     # run all tests, log full output to test.log
 python -m geass.main       # backend :8765
+python -m geass.check      # check env/config readiness (secrets shown as configured/not)
 cd web && npm run dev      # frontend HMR :5173 (proxied to 8765)
 ```
 
@@ -247,9 +313,10 @@ cd web && npm run dev      # frontend HMR :5173 (proxied to 8765)
 - Models without vision input (e.g. `deepseek-v4-flash`): with a PaddleOCR AI Studio token configured the Agent gets screen text + box coordinates and keeps mouse tools; without OCR it falls back to keyboard-only tools
 - PaddleOCR screenshots are uploaded to the AI Studio API; the token is required
 - Endpoints without a transcription API (e.g. DeepSeek): set `voice.fallback_model` to empty; on-device recognition still works
-- pyautogui per-key typing handles Chinese IME poorly — prefer ASCII, or a clipboard approach later
+- Non-ASCII text (e.g. Chinese) is pasted via the clipboard; on Linux this needs `xclip`/`xsel` (falls back to per-key typing otherwise)
 - Over plain HTTP on LAN, Web Speech API and Service Worker are unavailable: voice falls back to recorded upload, PWA degrades to a normal page
 - The v1 safety boundary only reviews `open_terminal` calls that carry a command; `terminal_type` streaming input and mouse/keyboard tools are not reviewed, so bypasses remain possible (to be extended later)
+- `find_element` relies on the Linux AT-SPI accessibility tree; Electron or custom-drawn apps may not expose controls, in which case the Agent falls back to estimating from the screenshot
 - Screenshots are sent to your configured model provider; avoid sensitive content
 
 Full design and roadmap: [docs/DESIGN.md](docs/DESIGN.md).

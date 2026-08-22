@@ -25,6 +25,9 @@ model = "gpt-5.6-terra"
 base_url = ""
 # 模型是否支持图像输入（视觉）。不支持视觉的模型会自动降级为文本模式
 vision = true
+# 支持图像输入的模型白名单（逗号分隔）。填写后以白名单为准：
+# 当前模型在白名单内 → 直接发截图；不在 → 自动与 PaddleOCR 配对（文本+坐标）
+vision_whitelist = []
 # 非视觉模型是否启用 PaddleOCR 把屏幕转成文本+坐标（AI Studio 远程 API）
 ocr = true
 # PaddleOCR 模型与远程服务端点

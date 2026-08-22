@@ -31,11 +31,15 @@ SYSTEM_PROMPT = (
     "4. 只执行用户任务范围内的操作，不做无关动作。\n"
     "5. 当用户要求打开终端执行 shell 命令时，直接调用 open_terminal 工具，"
     "不要尝试手动模拟打开终端的快捷键。\n"
-    "6. 如果用户任务匹配某个 SKILL 的描述，先调用 read_skill 获取该 SKILL"
+    "6. 需要点击目标时，优先调用 find_text（按文字找）或 find_element"
+    "（按控件名找）拿到精确归一化坐标，再用返回的 x/y 调用 click；"
+    "不要凭截图凭空估计坐标。能用键盘/快捷键完成的操作优先用"
+    "type_text / key_press，减少对像素坐标的依赖。\n"
+    "7. 如果用户任务匹配某个 SKILL 的描述，先调用 read_skill 获取该 SKILL"
     "的完整说明，再严格按说明执行；不要凭空编造不存在的技能。\n"
-    "7. open_terminal 中的高危 shell 命令会先由用户审核；若审核被拒绝或超时，"
+    "8. open_terminal 中的高危 shell 命令会先由用户审核；若审核被拒绝或超时，"
     "不要重复提交同一命令，换用其他方式，或调用 finish 说明无法继续。\n"
-    "8. 任务完成或无法继续时，必须调用 finish 并说明结果。"
+    "9. 任务完成或无法继续时，必须调用 finish 并说明结果。"
 )
 
 
@@ -248,6 +252,44 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "find_text",
+        "description": (
+            "在当前屏幕中查找包含指定文本的位置，返回文本包围盒中心的"
+            "归一化坐标，供 move/click 使用。exact=true 时要求完全匹配；"
+            "返回多个匹配时按列表顺序选择。适合不确定目标位置时先查坐标再点击。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "exact": {"type": "boolean"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "find_element",
+        "description": (
+            "通过桌面无障碍树（AT-SPI）查找可交互控件，返回控件中心归一化坐标。"
+            "name 是控件名称或名称的一部分；role 可选，如 push button、"
+            "menu item、text、combo box。找不到文本或图标类目标时使用本工具。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "role": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "screenshot",
         "description": "获取最新屏幕截图，帮助确认当前界面状态。",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -312,7 +354,7 @@ class Agent:
         self.config = config
         self.status_cb = status_cb
         self.vision_fallback_cb = vision_fallback_cb
-        self.vision = config.vision
+        self.vision = self.resolve_vision()
         self.skills = list(skills or [])
         self.terminal = terminal
         self.ocr = ocr
@@ -320,6 +362,22 @@ class Agent:
         self.ocr_checked = False
         self.security = security
         self.approval_gateway = approval_gateway
+
+    def resolve_vision(self) -> bool:
+        """按 vision_whitelist 决定是否给模型发截图。
+
+        白名单非空时以白名单为准：当前模型在名单内 → 视觉模式；
+        不在名单内 → 文本模式（可再与 PaddleOCR 配对）。
+        白名单为空时回退到 `config.vision` 布尔开关，保持旧行为。
+        """
+        whitelist = {
+            name.strip().casefold()
+            for name in self.config.vision_whitelist
+            if name.strip()
+        }
+        if whitelist:
+            return self.config.model.strip().casefold() in whitelist
+        return self.config.vision
 
     async def _emit(
         self, state: str, step: int = 0, tool: str | None = None, message: str = ""
@@ -440,6 +498,110 @@ class Agent:
                 return await run_in_thread(
                     self.terminal.close, args.get("session_id")
                 )
+            if name == "find_text":
+                text = str(args.get("text") or "").strip()
+                if not text:
+                    return {"ok": False, "error": "find_text 需要非空 text"}
+                exact = bool(args.get("exact"))
+                limit = min(20, max(1, int(args.get("limit") or 8)))
+                if not await self._ensure_ocr_ready():
+                    return {
+                        "ok": False,
+                        "error": "PaddleOCR 不可用，无法按文本查找坐标",
+                    }
+                try:
+                    image = await run_in_thread(
+                        self.capture.capture_image, self.config.image_max_edge
+                    )
+                    result = await run_in_thread(self.ocr.read, image)
+                except Exception as exc:
+                    return {"ok": False, "error": f"屏幕文本识别失败：{exc}"}
+                if not result.ok:
+                    return {"ok": False, "error": f"OCR 失败：{result.error}"}
+                needle = text.casefold()
+                matches = []
+                for box in result.boxes:
+                    candidate = str(box.text).casefold()
+                    hit = candidate == needle if exact else needle in candidate
+                    if hit:
+                        matches.append(
+                            {
+                                "text": box.text,
+                                "x": round(float(box.x), 4),
+                                "y": round(float(box.y), 4),
+                                "confidence": round(float(box.confidence), 4),
+                            }
+                        )
+                    if len(matches) >= limit:
+                        break
+                if not matches:
+                    return {
+                        "ok": True,
+                        "found": False,
+                        "matches": [],
+                        "message": f"当前屏幕未找到文本「{text}」",
+                    }
+                return {
+                    "ok": True,
+                    "found": True,
+                    "count": len(matches),
+                    "matches": matches,
+                    "message": (
+                        f"找到 {len(matches)} 处文本「{text}」，"
+                        "用返回的 x/y 调用 move/click"
+                    ),
+                }
+            if name == "find_element":
+                query = str(args.get("name") or "").strip()
+                if not query:
+                    return {"ok": False, "error": "find_element 需要非空 name"}
+                role = str(args.get("role") or "").strip()
+                limit = min(20, max(1, int(args.get("limit") or 10)))
+
+                def _lookup() -> list[dict[str, Any]]:
+                    from .io.accessibility import find_elements
+
+                    return find_elements(
+                        name=query, role=role, limit=limit
+                    )
+
+                try:
+                    found = await run_in_thread(_lookup)
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "error": f"控件查找失败：{exc}",
+                    }
+                if not found:
+                    return {
+                        "ok": True,
+                        "found": False,
+                        "matches": [],
+                        "message": f"未找到控件「{query}」",
+                    }
+                width, height = self.backend.screen_size()
+                matches = [
+                    {
+                        "name": item["name"],
+                        "role": item.get("role", ""),
+                        "x": round((item["x"] + item["w"] / 2) / width, 4)
+                        if width
+                        else 0.5,
+                        "y": round((item["y"] + item["h"] / 2) / height, 4)
+                        if height
+                        else 0.5,
+                    }
+                    for item in found
+                ]
+                return {
+                    "ok": True,
+                    "found": True,
+                    "count": len(matches),
+                    "matches": matches,
+                    "message": (
+                        f"找到 {len(matches)} 个控件，用返回的 x/y 调用 move/click"
+                    ),
+                }
             if name == "list_skills":
                 return {
                     "ok": True,
@@ -503,10 +665,14 @@ class Agent:
             "output": output,
         }
 
-    async def _prepare_ocr(self) -> None:
-        """首次进入文本模式时探测 OCR，避免每个请求都重试加载模型。"""
-        if self.ocr_checked or self.ocr is None or self.vision:
-            return
+    async def _ensure_ocr_ready(self) -> bool:
+        """探测 OCR 是否可用；只探测一次，失败后不再重复。"""
+        if self.ocr is None:
+            return False
+        if self.ocr_ready:
+            return True
+        if self.ocr_checked:
+            return False
         self.ocr_checked = True
         try:
             image = await run_in_thread(
@@ -518,6 +684,7 @@ class Agent:
                 logger.warning("PaddleOCR 初始化失败：%s", result.error)
         except Exception as exc:
             logger.warning("PaddleOCR 不可用，文本模式降级为键盘-only：%s", exc)
+        return self.ocr_ready
 
     async def _screen_content(self, label: str) -> dict[str, Any] | None:
         """返回当前屏幕的模型输入（视觉截图或 OCR 文本转写）。"""
@@ -558,7 +725,8 @@ class Agent:
             )
 
         cancel = cancel or asyncio.Event()
-        await self._prepare_ocr()
+        if not self.vision:
+            await self._ensure_ocr_ready()
         try:
             messages = await self._initial_messages(command)
         except Exception:
@@ -582,7 +750,7 @@ class Agent:
                             self.vision_fallback_cb()
                         except Exception:
                             logger.warning("持久化 vision=false 失败", exc_info=True)
-                    await self._prepare_ocr()
+                    await self._ensure_ocr_ready()
                     tools = self._tools()
                     messages = await self._initial_messages(command)
                     await self._emit(
@@ -695,14 +863,14 @@ class Agent:
         if not self.vision:
             if self.ocr is not None and self.ocr_ready:
                 prompt += (
-                    "\n注意：当前模型不支持图像输入，但已启用 PaddleOCR 屏幕识别。"
+                    "\n注意：当前未启用图像输入，但已与 PaddleOCR 屏幕识别配对。"
                     "每步会把屏幕文本和文本包围盒中心坐标（归一化 0~1）作为文本提供，"
                     "可以据此调用 move/click 等鼠标工具；若目标没有对应文本，"
                     "不要盲目点击，可先调用 screenshot 获取最新文本。"
                 )
             else:
                 prompt += (
-                    "\n注意：当前模型不支持视觉输入，且 PaddleOCR 不可用。"
+                    "\n注意：当前未启用图像输入，且 PaddleOCR 不可用。"
                     "不要调用坐标类或截图工具"
                     "（move/click/double_click/right_click/scroll/drag/screenshot），"
                     "仅使用 type_text、key_press、open_terminal、terminal_*、"

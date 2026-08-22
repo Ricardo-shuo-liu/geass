@@ -103,6 +103,40 @@ def test_missing_client_raises():
         asyncio.run(agent.run("任务"))
 
 
+def test_vision_whitelist_empty_falls_back_to_flag():
+    agent, _, _ = build([])
+    agent.config.vision_whitelist = ()
+    agent.config.vision = False
+
+    assert agent.resolve_vision() is False
+
+
+def test_vision_whitelist_membership_overrides_flag():
+    agent, _, _ = build([])
+    agent.config.model = "gpt-5.6-terra"
+    agent.config.vision_whitelist = ("sol", "gpt-5.6-terra")
+    agent.config.vision = False
+
+    assert agent.resolve_vision() is True
+
+
+def test_vision_whitelist_non_member_uses_ocr_pairing():
+    agent, _, _ = build([])
+    agent.config.model = "deepseek-v4-flash"
+    agent.config.vision_whitelist = ("gpt-5.6-terra",)
+    agent.config.vision = True
+
+    assert agent.resolve_vision() is False
+
+
+def test_vision_whitelist_is_case_insensitive():
+    agent, _, _ = build([])
+    agent.config.model = "GPT-5.6-TERRA"
+    agent.config.vision_whitelist = ("gpt-5.6-terra",)
+
+    assert agent.resolve_vision() is True
+
+
 def test_status_events_emitted():
     script = [
         FakeResponse(

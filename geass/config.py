@@ -4,7 +4,8 @@
     环境变量 > ~/.geass/env.toml > 项目 config.toml > 内置默认值
 
 统一环境变量：
-    GEASS_API_KEY / GEASS_BASE_URL / GEASS_MODEL / GEASS_TOKEN / GEASS_CONFIG / GEASS_HOME
+    GEASS_API_KEY / GEASS_BASE_URL / GEASS_MODEL / GEASS_VISION_WHITELIST
+    / GEASS_TOKEN / GEASS_CONFIG / GEASS_HOME
     GEASS_PADDLEOCR_TOKEN / GEASS_PADDLEOCR_MODEL / GEASS_PADDLEOCR_BASE_URL
 
 `python -m geass.main` 启动时若检测到 GEASS_* 环境变量，会把它们写入
@@ -52,6 +53,7 @@ class AgentConfig:
     image_max_edge: int = 1568
     base_url: str = ""
     vision: bool = True
+    vision_whitelist: tuple[str, ...] = ()
     ocr: bool = True
     ocr_token: str = ""
     ocr_model: str = "PaddleOCR-VL-1.6"
@@ -191,6 +193,25 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     vision = bool(
         pick(u_agent, "vision", pick(p_agent, "vision", True))
     )
+    vision_whitelist_value = os.environ.get("GEASS_VISION_WHITELIST")
+    if not vision_whitelist_value:
+        vision_whitelist_value = pick(
+            u_agent, "vision_whitelist", pick(p_agent, "vision_whitelist", [])
+        )
+    if isinstance(vision_whitelist_value, str):
+        vision_whitelist = tuple(
+            item.strip()
+            for item in str(vision_whitelist_value).split(",")
+            if item.strip()
+        )
+    elif isinstance(vision_whitelist_value, (list, tuple)):
+        vision_whitelist = tuple(
+            str(item).strip()
+            for item in vision_whitelist_value
+            if str(item).strip()
+        )
+    else:
+        vision_whitelist = ()
     ocr = bool(pick(u_agent, "ocr", pick(p_agent, "ocr", True)))
     ocr_token = (
         os.environ.get("GEASS_PADDLEOCR_TOKEN")
@@ -277,6 +298,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             image_max_edge=max(1, int(pick(p_agent, "image_max_edge", 1568))),
             base_url=base_url,
             vision=vision,
+            vision_whitelist=vision_whitelist,
             ocr=ocr,
             ocr_token=ocr_token,
             ocr_model=ocr_model,
@@ -299,7 +321,13 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
 
     if persist:
         _persist_runtime_values(
-            model, base_url, api_key, ocr_token, ocr_model, ocr_base_url
+            model,
+            base_url,
+            api_key,
+            ocr_token,
+            ocr_model,
+            ocr_base_url,
+            vision_whitelist,
         )
 
     return config
@@ -312,6 +340,7 @@ def _persist_runtime_values(
     ocr_token: str = "",
     ocr_model: str = "",
     ocr_base_url: str = "",
+    vision_whitelist: tuple[str, ...] = (),
 ) -> None:
     """启动时把环境变量沉淀到用户级配置，避免重复配置（访问 token 除外）。"""
     updates: dict[str, dict[str, Any]] = {"agent": {}}
@@ -327,6 +356,8 @@ def _persist_runtime_values(
         updates["agent"]["ocr_model"] = ocr_model
     if "GEASS_PADDLEOCR_BASE_URL" in os.environ and ocr_base_url:
         updates["agent"]["ocr_base_url"] = ocr_base_url
+    if "GEASS_VISION_WHITELIST" in os.environ and vision_whitelist:
+        updates["agent"]["vision_whitelist"] = list(vision_whitelist)
     save_user_env(updates)
 
 
@@ -370,6 +401,10 @@ def main() -> None:
         "--ocr-base-url",
         help="PaddleOCR 服务端点（默认 https://paddleocr.aistudio-app.com）",
     )
+    set_parser.add_argument(
+        "--vision-whitelist",
+        help="支持图像输入的模型白名单（逗号分隔；留空则按 --vision 决定）",
+    )
     set_parser.add_argument("--skills-dir", help="SKILL 目录（默认项目下 skills）")
     set_parser.add_argument(
         "--security-enabled",
@@ -387,6 +422,7 @@ def main() -> None:
         print(f"model     = {config.agent.model}")
         print(f"base_url  = {config.agent.base_url or '（OpenAI 默认）'}")
         print(f"vision    = {config.agent.vision}")
+        print(f"vision_whitelist = {', '.join(config.agent.vision_whitelist) or '（未设置）'}")
         print(f"ocr       = {config.agent.ocr}（model={config.agent.ocr_model}）")
         print(f"ocr_url   = {config.agent.ocr_base_url}")
         print(f"skills    = {config.agent.skills_dir}")
@@ -422,6 +458,12 @@ def main() -> None:
         updates["agent"]["ocr_model"] = args.ocr_model
     if args.ocr_base_url:
         updates["agent"]["ocr_base_url"] = args.ocr_base_url
+    if args.vision_whitelist is not None:
+        updates["agent"]["vision_whitelist"] = [
+            item.strip()
+            for item in args.vision_whitelist.split(",")
+            if item.strip()
+        ]
     if args.skills_dir:
         updates["agent"]["skills_dir"] = args.skills_dir
     if args.security_enabled is not None:
