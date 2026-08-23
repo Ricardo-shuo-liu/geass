@@ -48,6 +48,7 @@ class Memory:
         max_entries: int = 200,
     ) -> None:
         self.dir = Path(path) if path else default_memory_path()
+        self.dir.mkdir(parents=True, exist_ok=True)
         self.entries_path = self.dir / "entries.json"
         self.max_entries = max(1, int(max_entries))
         self._lock = threading.RLock()
