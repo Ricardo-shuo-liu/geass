@@ -37,6 +37,7 @@ _SYSTEM_PYTHON_CANDIDATES = (
     "/usr/bin/python",
 )
 _BRIDGE_SCRIPT = os.path.join(os.path.dirname(__file__), "_atspi_bridge.py")
+_WINDOW_ROLES = {"frame", "window", "dialog"}
 
 
 def _load_pyatspi() -> Any:
@@ -172,6 +173,25 @@ def _find_via_bridge(
     ]
 
 
+def _list_windows_via_bridge(limit: int, timeout: float) -> list[dict[str, Any]]:
+    result = _run_bridge(
+        {
+            "op": "windows",
+            "limit": limit,
+            "timeout": timeout,
+        },
+        timeout,
+    )
+    windows = result.get("windows")
+    if not isinstance(windows, list):
+        return []
+    return [
+        item
+        for item in windows
+        if isinstance(item, dict) and "name" in item
+    ]
+
+
 def find_elements(
     name: str = "",
     role: str = "",
@@ -260,3 +280,94 @@ def find_elements(
 
     walk(desktop)
     return matches[:limit]
+
+
+def list_windows(limit: int = 50, timeout: float = 5.0) -> list[dict[str, Any]]:
+    """返回可见顶层窗口信息：``{name, role, x, y, w, h, active, visible}``。
+
+    供 Agent 在动作后验证"新窗口/新标签页是否真的打开了"；视觉之外的第二条
+    信息通道。依赖 AT-SPI（缺失时经系统 Python 桥接，不可用则抛错）。
+    """
+    try:
+        pyatspi = _load_pyatspi()
+    except AccessibilityError as exc:
+        if exc.bridge_fallback:
+            return _list_windows_via_bridge(
+                max(1, min(int(limit), 100)), float(timeout)
+            )
+        raise
+
+    try:
+        desktop = pyatspi.Registry.getDesktop(0)
+    except Exception as exc:
+        raise AccessibilityError(f"无法连接 AT-SPI 无障碍总线：{exc}") from exc
+
+    windows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    deadline = time.monotonic() + max(0.1, float(timeout))
+    desktop_coords = getattr(pyatspi, "DESKTOP_COORDS", 0)
+    active_state = getattr(pyatspi, "STATE_ACTIVE", None)
+    visible_state = getattr(pyatspi, "STATE_VISIBLE", None)
+
+    def walk(node: Any) -> None:
+        if len(windows) >= limit or time.monotonic() >= deadline:
+            return
+        marker = id(node)
+        if marker in seen:
+            return
+        seen.add(marker)
+
+        try:
+            role_name = str(node.getRoleName() or "").casefold()
+        except Exception:
+            role_name = ""
+
+        if role_name in _WINDOW_ROLES:
+            name = str(getattr(node, "name", "") or "")
+            active = False
+            visible = False
+            x = y = w = h = 0
+            try:
+                state = node.getState()
+                active = bool(active_state and state.contains(active_state))
+                visible = bool(visible_state and state.contains(visible_state))
+                component = node.queryComponent()
+                extents = component.getExtents(desktop_coords)
+                x = int(getattr(extents, "x", 0))
+                y = int(getattr(extents, "y", 0))
+                w = int(getattr(extents, "width", 0))
+                h = int(getattr(extents, "height", 0))
+            except Exception:
+                pass
+            if name or active or visible or (w > 0 and h > 0):
+                windows.append(
+                    {
+                        "name": name,
+                        "role": role_name,
+                        "x": x,
+                        "y": y,
+                        "w": w,
+                        "h": h,
+                        "active": active,
+                        "visible": visible,
+                    }
+                )
+                if len(windows) >= limit:
+                    return
+
+        try:
+            child_count = int(node.childCount)
+        except Exception:
+            return
+        for index in range(child_count):
+            if len(windows) >= limit or time.monotonic() >= deadline:
+                return
+            try:
+                child = node.getChildAtIndex(index)
+            except Exception:
+                continue
+            if child is not None:
+                walk(child)
+
+    walk(desktop)
+    return windows[:limit]

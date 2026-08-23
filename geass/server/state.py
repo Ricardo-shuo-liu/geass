@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,11 +10,18 @@ from openai import AsyncOpenAI
 
 from ..agent import Agent
 from ..config import Config, save_user_env
+from ..evolution import EvolutionEngine
 from ..io.backend import InputBackend, PyAutoGUIInputBackend
 from ..io.terminal import TerminalManager
+from ..memory import Memory
 from ..ocr import PaddleOCRBackend
 from ..screen import ScreenCapture, ScreenStreamer
-from ..skills import load_skills
+from ..skills import (
+    load_skills,
+    resolve_skill_root,
+    resolve_skills_dir,
+    sync_system_skills,
+)
 from .approval import ApprovalManager
 
 
@@ -27,7 +35,12 @@ class AppState:
     client: AsyncOpenAI | None
     terminal_manager: TerminalManager = field(default_factory=TerminalManager)
     skills: list = field(default_factory=list)
+    skill_source_dir: Any = None
+    skill_root: Any = None
     ocr: Any = None
+    memory: Memory | None = None
+    evolution: EvolutionEngine | None = None
+    last_activity: float = field(default_factory=time.time)
     approval_manager: ApprovalManager = field(default_factory=ApprovalManager)
     control_clients: set = field(default_factory=set)
     agent_task: asyncio.Task | None = None
@@ -56,7 +69,12 @@ def build_state(config: Config) -> AppState:
         client = AsyncOpenAI(**kwargs)
 
     terminal_manager = TerminalManager(default_timeout=config.agent.terminal_timeout)
-    skills = load_skills(config.agent.skills_dir, config.config_path)
+    skill_source_dir = resolve_skills_dir(
+        config.agent.skills_dir, config.config_path
+    )
+    skill_root = resolve_skill_root(config.agent.skill_root, config.config_path)
+    sync_system_skills(skill_source_dir, skill_root)
+    skills = load_skills(skill_root, config.config_path)
     approval_manager = ApprovalManager(
         default_timeout=config.security.approval_timeout
     )
@@ -70,6 +88,14 @@ def build_state(config: Config) -> AppState:
         if config.agent.ocr
         else None
     )
+    memory = (
+        Memory(
+            config.agent.memory_path or None,
+            max_entries=config.agent.memory_max_entries,
+        )
+        if config.agent.memory_enabled
+        else None
+    )
 
     state = AppState(
         config=config,
@@ -80,7 +106,10 @@ def build_state(config: Config) -> AppState:
         client=client,
         terminal_manager=terminal_manager,
         skills=skills,
+        skill_source_dir=skill_source_dir,
+        skill_root=skill_root,
         ocr=ocr,
+        memory=memory,
         approval_manager=approval_manager,
     )
     approval_manager.broadcast = lambda message: broadcast_control(state, message)
@@ -96,6 +125,20 @@ def build_state(config: Config) -> AppState:
         ocr=ocr,
         security=config.security,
         approval_gateway=approval_manager.request,
+        memory=memory,
+    )
+    state.evolution = (
+        EvolutionEngine(
+            client=client,
+            config=config.agent,
+            memory=memory,
+            skill_root=skill_root,
+            source_dir=skill_source_dir,
+            status_cb=lambda message: broadcast_control(state, message),
+            activity_since=lambda: state.last_activity,
+        )
+        if client is not None
+        else None
     )
     return state
 
@@ -126,11 +169,50 @@ def reload_state(state: AppState, config: Config) -> None:
         else None
     )
     state.ocr = state.agent.ocr
+    state.memory = (
+        Memory(
+            config.agent.memory_path or None,
+            max_entries=config.agent.memory_max_entries,
+        )
+        if config.agent.memory_enabled
+        else None
+    )
+    state.agent.memory = state.memory
+    state.skill_source_dir = _resolve_source_dir(config)
+    state.skill_root = resolve_skill_root(
+        config.agent.skill_root, config.config_path
+    )
+    sync_system_skills(state.skill_source_dir, state.skill_root)
+    state.skills = load_skills(state.skill_root, config.config_path)
+    state.agent.skills = state.skills
+    if state.evolution is None:
+        state.evolution = (
+            EvolutionEngine(
+                client=client,
+                config=config.agent,
+                memory=state.memory,
+                skill_root=state.skill_root,
+                source_dir=state.skill_source_dir,
+                status_cb=lambda message: broadcast_control(state, message),
+                activity_since=lambda: state.last_activity,
+            )
+            if client is not None
+            else None
+        )
+    else:
+        state.evolution.client = client
+        state.evolution.config = config.agent
+        state.evolution.memory = state.memory
+        state.evolution.root = state.skill_root
+        state.evolution.source_dir = state.skill_source_dir
     state.agent.security = config.security
     state.approval_manager.default_timeout = config.security.approval_timeout
     state.terminal_manager.default_timeout = config.agent.terminal_timeout
-    state.skills = load_skills(config.agent.skills_dir, config.config_path)
-    state.agent.skills = state.skills
+    state.last_activity = time.time()
     state.capture.max_width = config.screen.max_width
     state.capture.jpeg_quality = config.screen.jpeg_quality
     state.streamer.interval = 1.0 / max(1, config.screen.fps)
+
+
+def _resolve_source_dir(config: Config):
+    return resolve_skills_dir(config.agent.skills_dir, config.config_path)

@@ -24,6 +24,9 @@ from typing import Any
 
 import tomli
 
+from .memory import default_memory_path
+from .skills import resolve_skill_root
+
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.toml"
 
 
@@ -61,6 +64,15 @@ class AgentConfig:
     ocr_timeout: float = 90.0
     terminal_timeout: float = 15.0
     skills_dir: str = "skills"
+    memory_enabled: bool = True
+    memory_path: str = ""
+    memory_max_entries: int = 200
+    memory_context_entries: int = 8
+    skill_root: str = ""
+    evolution_enabled: bool = True
+    evolution_idle_seconds: float = 300.0
+    evolution_interval: float = 1800.0
+    evolution_max_skills: int = 20
 
 
 @dataclass
@@ -258,6 +270,75 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
         ),
     )
     skills_dir = str(pick(u_agent, "skills_dir", pick(p_agent, "skills_dir", "skills")))
+    memory_enabled = bool(
+        pick(u_agent, "memory_enabled", pick(p_agent, "memory_enabled", True))
+    )
+    memory_path = str(
+        pick(u_agent, "memory_path", pick(p_agent, "memory_path", "")) or ""
+    )
+    memory_max_entries = max(
+        1,
+        int(
+            pick(
+                u_agent,
+                "memory_max_entries",
+                pick(p_agent, "memory_max_entries", 200),
+            )
+        ),
+    )
+    memory_context_entries = max(
+        1,
+        int(
+            pick(
+                u_agent,
+                "memory_context_entries",
+                pick(p_agent, "memory_context_entries", 8),
+            )
+        ),
+    )
+    skill_root = str(
+        pick(u_agent, "skill_root", pick(p_agent, "skill_root", "")) or ""
+    )
+    evolution_enabled = bool(
+        pick(
+            u_agent,
+            "evolution_enabled",
+            pick(p_agent, "evolution_enabled", True),
+        )
+    )
+    evolution_idle_seconds = max(
+        30.0,
+        float(
+            pick(
+                u_agent,
+                "evolution_idle_seconds",
+                pick(p_agent, "evolution_idle_seconds", 300.0),
+            )
+        ),
+    )
+    evolution_interval = max(
+        60.0,
+        float(
+            pick(
+                u_agent,
+                "evolution_interval",
+                pick(p_agent, "evolution_interval", 1800.0),
+            )
+        ),
+    )
+    evolution_max_skills = max(
+        1,
+        min(
+            100,
+            int(
+                pick(
+                    u_agent,
+                    "evolution_max_skills",
+                    pick(p_agent, "evolution_max_skills", 20),
+                )
+            ),
+        ),
+    )
     security_enabled = bool(
         pick(u_security, "enabled", pick(p_security, "enabled", True))
     )
@@ -306,6 +387,15 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             ocr_timeout=ocr_timeout,
             terminal_timeout=terminal_timeout,
             skills_dir=skills_dir,
+            memory_enabled=memory_enabled,
+            memory_path=memory_path,
+            memory_max_entries=memory_max_entries,
+            memory_context_entries=memory_context_entries,
+            skill_root=skill_root,
+            evolution_enabled=evolution_enabled,
+            evolution_idle_seconds=evolution_idle_seconds,
+            evolution_interval=evolution_interval,
+            evolution_max_skills=evolution_max_skills,
         ),
         security=SecurityConfig(
             enabled=security_enabled,
@@ -407,6 +497,37 @@ def main() -> None:
     )
     set_parser.add_argument("--skills-dir", help="SKILL 目录（默认项目下 skills）")
     set_parser.add_argument(
+        "--memory-enabled",
+        choices=["true", "false"],
+        help="是否启用持久记忆（默认 true）",
+    )
+    set_parser.add_argument(
+        "--memory-path", help="记忆目录路径（默认 ~/.geass/.memory）"
+    )
+    set_parser.add_argument(
+        "--skill-root", help="运行时 SKILL 根目录（默认 ~/.geass/.skill）"
+    )
+    set_parser.add_argument(
+        "--evolution-enabled",
+        choices=["true", "false"],
+        help="是否启用空闲进化系统（默认 true）",
+    )
+    set_parser.add_argument(
+        "--evolution-idle-seconds",
+        type=float,
+        help="空闲多少秒后触发进化（最低 30 秒）",
+    )
+    set_parser.add_argument(
+        "--evolution-interval",
+        type=float,
+        help="两次进化的最小间隔秒数（最低 60 秒）",
+    )
+    set_parser.add_argument(
+        "--evolution-max-skills",
+        type=int,
+        help="运行时自动生成 SKILL 的数量上限（1~100）",
+    )
+    set_parser.add_argument(
         "--security-enabled",
         choices=["true", "false"],
         help="是否启用高危 shell 命令审核",
@@ -426,6 +547,19 @@ def main() -> None:
         print(f"ocr       = {config.agent.ocr}（model={config.agent.ocr_model}）")
         print(f"ocr_url   = {config.agent.ocr_base_url}")
         print(f"skills    = {config.agent.skills_dir}")
+        print(
+            "memory    = "
+            f"enabled={config.agent.memory_enabled}, "
+            f"path={config.agent.memory_path or default_memory_path()}"
+        )
+        print(
+            "evolution = "
+            f"enabled={config.agent.evolution_enabled}, "
+            f"idle={config.agent.evolution_idle_seconds:.0f}s, "
+            f"interval={config.agent.evolution_interval:.0f}s, "
+            f"max={config.agent.evolution_max_skills}, "
+            f"root={config.agent.skill_root or resolve_skill_root(None)}"
+        )
         print(f"api_key   = {mask_secret(config.api_key) or '（未设置）'}")
         print(f"ocr_token = {mask_secret(config.agent.ocr_token) or '（未设置）'}")
         print(
@@ -466,6 +600,26 @@ def main() -> None:
         ]
     if args.skills_dir:
         updates["agent"]["skills_dir"] = args.skills_dir
+    if args.memory_enabled is not None:
+        updates["agent"]["memory_enabled"] = args.memory_enabled == "true"
+    if args.memory_path:
+        updates["agent"]["memory_path"] = args.memory_path
+    if args.skill_root:
+        updates["agent"]["skill_root"] = args.skill_root
+    if args.evolution_enabled is not None:
+        updates["agent"]["evolution_enabled"] = args.evolution_enabled == "true"
+    if args.evolution_idle_seconds is not None:
+        updates["agent"]["evolution_idle_seconds"] = max(
+            30.0, float(args.evolution_idle_seconds)
+        )
+    if args.evolution_interval is not None:
+        updates["agent"]["evolution_interval"] = max(
+            60.0, float(args.evolution_interval)
+        )
+    if args.evolution_max_skills is not None:
+        updates["agent"]["evolution_max_skills"] = max(
+            1, min(100, int(args.evolution_max_skills))
+        )
     if args.security_enabled is not None:
         updates["security"]["enabled"] = args.security_enabled == "true"
     if args.approval_timeout is not None:

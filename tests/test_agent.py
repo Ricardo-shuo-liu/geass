@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
+from PIL import Image
 
 from geass.agent import TEXT_ONLY_TOOLS, Agent, AgentError
 from geass.config import AgentConfig
+from geass.memory import Memory
 from geass.ocr import OCRBox, OCRResult
 
 from .conftest import (
@@ -194,8 +197,204 @@ def test_vision_fallback_when_model_rejects_images():
         assert tool_names <= TEXT_ONLY_TOOLS
         for message in request["messages"]:
             content = message.get("content")
-            if isinstance(content, list):
-                assert not any(part.get("type") == "image_url" for part in content)
+        if isinstance(content, list):
+            assert not any(part.get("type") == "image_url" for part in content)
+
+
+def test_plan_tool_records_plan_and_injects_reminder():
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall(
+                        "call_1",
+                        "plan",
+                        json.dumps(
+                            {
+                                "difficulty": "hard",
+                                "goal": "打开浏览器并新建页面",
+                                "steps": ["启动浏览器", "新建标签页", "验证"],
+                            }
+                        ),
+                    )
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, client = build(script)
+    events = []
+
+    async def callback(message):
+        events.append(message)
+
+    agent.status_cb = callback
+    result = asyncio.run(agent.run("打开浏览器，然后新建一个页面"))
+
+    assert result["state"] == "done"
+    assert agent.plan is not None
+    assert agent.plan.difficulty == "hard"
+    assert len(agent.plan.steps) == 3
+    assert any(
+        event.get("state") == "planned" and event.get("plan")
+        for event in events
+    )
+    second_request_contents = [
+        message["content"]
+        for message in client.requests[1]["messages"]
+        if isinstance(message["content"], str)
+    ]
+    assert any(
+        "任务计划（困难任务）" in content for content in second_request_contents
+    )
+
+
+def test_plan_tool_resets_between_runs():
+    agent, _, client = build(
+        [
+            FakeResponse(
+                message=FakeMessage(
+                    tool_calls=[
+                        FakeToolCall(
+                            "call_1",
+                            "plan",
+                            '{"difficulty": "easy", "goal": "g", "steps": ["a"]}',
+                        )
+                    ]
+                )
+            ),
+            FakeResponse(
+                message=FakeMessage(
+                    tool_calls=[
+                        FakeToolCall("call_2", "finish", '{"summary": "done"}'),
+                    ]
+                )
+            ),
+        ]
+    )
+    asyncio.run(agent.run("任务一"))
+    assert agent.plan is not None
+
+    client.script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "finish", '{"summary": "done"}'),
+                ]
+            )
+        )
+    ]
+    asyncio.run(agent.run("任务二"))
+    assert agent.plan is None
+
+
+def test_browser_tool_calls_browser_module(monkeypatch):
+    captured = {}
+
+    def fake_open_page(action, url):
+        captured["action"] = action
+        captured["url"] = url
+        return {"ok": True, "message": "opened", "action": action, "url": url}
+
+    monkeypatch.setattr("geass.agent.browser.open_page", fake_open_page)
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall(
+                        "call_1",
+                        "browser",
+                        '{"action": "new_tab", "url": "https://example.com"}',
+                    )
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, _ = build(script)
+    result = asyncio.run(agent.run("新建一个页面"))
+
+    assert result["state"] == "done"
+    assert captured == {
+        "action": "new_tab",
+        "url": "https://example.com",
+    }
+
+
+def test_memory_tools_read_write(tmp_path):
+    memory = Memory(tmp_path / ".memory")
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall(
+                        "call_1",
+                        "remember",
+                        '{"key": "默认浏览器", "value": "firefox"}',
+                    )
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall(
+                        "call_2",
+                        "recall",
+                        '{"query": "浏览器", "limit": 3}',
+                    )
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_3", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, _ = build(script)
+    agent.memory = memory
+
+    result = asyncio.run(agent.run("记住默认浏览器"))
+
+    assert result["state"] == "done"
+    assert memory.recall("浏览器")[0]["value"] == "firefox"
+
+
+def test_memory_tools_hidden_when_disabled():
+    agent, _, client = build(
+        [
+            FakeResponse(
+                message=FakeMessage(
+                    tool_calls=[
+                        FakeToolCall("call_1", "finish", '{"summary": "done"}'),
+                    ]
+                )
+            )
+        ]
+    )
+    agent.memory = None
+    asyncio.run(agent.run("任务"))
+    names = {
+        tool["function"]["name"] for tool in client.requests[0]["tools"]
+    }
+    assert "remember" not in names
+    assert "plan" in names
+    assert "browser" in names
 
 
 def test_text_mode_with_ocr_keeps_mouse_tools_and_transcript():
@@ -255,3 +454,236 @@ def test_text_mode_without_ocr_stays_keyboard_only():
     tools = agent._tools()
 
     assert {tool["function"]["name"] for tool in tools} <= TEXT_ONLY_TOOLS
+
+
+def test_screen_change_detection_warns_when_nothing_changed():
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "click", '{"x": 0.5, "y": 0.5}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, client = build(script)
+
+    result = asyncio.run(agent.run("点击屏幕中央"))
+
+    assert result["state"] == "done"
+    tool_results = [
+        json.loads(message["content"])
+        for message in client.requests[0]["messages"]
+        if message.get("role") == "tool"
+    ]
+    click_result = next(
+        result_ for result_ in tool_results if "单击" in str(result_.get("message"))
+    )
+    assert click_result["screen_changed"] is False
+    assert "屏幕未检测到变化" in click_result["message"]
+
+
+def test_screen_change_detection_reports_change():
+    class ChangingCapture(FakeCapture):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def capture_image(self, max_edge: int | None = None):
+            self.calls += 1
+            color = 0 if self.calls % 2 else 255
+            return Image.new("RGB", (100, 80), (color, color, color))
+
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "key_press", '{"combo": "enter"}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, client = build(script)
+    agent.capture = ChangingCapture()
+
+    result = asyncio.run(agent.run("按回车"))
+
+    assert result["state"] == "done"
+    tool_results = [
+        json.loads(message["content"])
+        for message in client.requests[0]["messages"]
+        if message.get("role") == "tool"
+    ]
+    key_result = next(
+        result_ for result_ in tool_results if "已按键" in str(result_.get("message"))
+    )
+    assert key_result["screen_changed"] is True
+
+
+def test_window_info_tool_reports_active_window(monkeypatch):
+    def fake_list_windows(limit: int = 20):
+        return [
+            {
+                "name": "Firefox — 新标签页",
+                "role": "frame",
+                "x": 0,
+                "y": 0,
+                "w": 1920,
+                "h": 1080,
+                "active": True,
+                "visible": True,
+            },
+            {
+                "name": "Files",
+                "role": "frame",
+                "x": 10,
+                "y": 10,
+                "w": 800,
+                "h": 600,
+                "active": False,
+                "visible": True,
+            },
+        ]
+
+    monkeypatch.setattr("geass.io.accessibility.list_windows", fake_list_windows)
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "window_info", '{"limit": 10}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, client = build(script)
+
+    result = asyncio.run(agent.run("检查活动窗口"))
+
+    assert result["state"] == "done"
+    tool_results = [
+        json.loads(message["content"])
+        for message in client.requests[0]["messages"]
+        if message.get("role") == "tool"
+    ]
+    window_result = next(
+        result_ for result_ in tool_results if "active_window" in result_
+    )
+    assert window_result["active_window"]["name"] == "Firefox — 新标签页"
+    assert window_result["count"] == 2
+
+
+def test_hard_browser_task_plans_launches_and_verifies(monkeypatch):
+    launched: list[tuple[str, str]] = []
+
+    def fake_open_page(action: str, url: str):
+        launched.append((action, url))
+        return {
+            "ok": True,
+            "message": f"已启动 {action}",
+            "action": action,
+            "url": url or "about:blank",
+        }
+
+    def fake_list_windows(limit: int = 20):
+        return [
+            {
+                "name": "Firefox — 新标签页",
+                "role": "frame",
+                "x": 0,
+                "y": 0,
+                "w": 1920,
+                "h": 1080,
+                "active": True,
+                "visible": True,
+            }
+        ]
+
+    monkeypatch.setattr("geass.agent.browser.open_page", fake_open_page)
+    monkeypatch.setattr("geass.io.accessibility.list_windows", fake_list_windows)
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall(
+                        "call_1",
+                        "plan",
+                        json.dumps(
+                            {
+                                "difficulty": "hard",
+                                "goal": "打开浏览器并新建一个页面",
+                                "steps": ["启动浏览器", "新建标签页", "验证页面"],
+                            }
+                        ),
+                    )
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_2", "browser", '{"action": "new_tab"}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_3", "window_info", '{"limit": 10}'),
+                ]
+            )
+        ),
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_4", "finish", '{"summary": "新页面已打开"}'),
+                ]
+            )
+        ),
+    ]
+    agent, _, client = build(script)
+    events = []
+
+    async def callback(message):
+        events.append(message)
+
+    agent.status_cb = callback
+    result = asyncio.run(agent.run("打开浏览器，然后新建一个页面"))
+
+    assert result["state"] == "done"
+    assert launched == [("new_tab", "")]
+    assert agent.plan is not None
+    assert agent.plan.difficulty == "hard"
+    assert any(
+        event.get("state") == "planned" and event.get("plan")
+        for event in events
+    )
+    tool_results = [
+        json.loads(message["content"])
+        for message in client.requests[0]["messages"]
+        if message.get("role") == "tool"
+    ]
+    verified = next(
+        result_ for result_ in tool_results if "active_window" in result_
+    )
+    assert verified["active_window"]["name"] == "Firefox — 新标签页"

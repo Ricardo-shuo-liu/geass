@@ -1,6 +1,7 @@
 export type AgentState =
   | 'accepted'
   | 'thinking'
+  | 'planned'
   | 'acting'
   | 'acted'
   | 'awaiting_approval'
@@ -17,7 +18,15 @@ export interface AgentStatus {
   step: number;
   tool?: string | null;
   message?: string;
+  plan?: TaskPlan | null;
   _time?: string;
+}
+
+export interface TaskPlan {
+  difficulty: 'easy' | 'hard';
+  goal: string;
+  steps: string[];
+  current_step: number;
 }
 
 export interface AgentResult {
@@ -45,6 +54,15 @@ export interface ApprovalResolved {
   _time?: string;
 }
 
+export interface EvolutionStatus {
+  type: 'evolution_status';
+  created: boolean;
+  name?: string;
+  description?: string;
+  message: string;
+  _time?: string;
+}
+
 export interface ServerError {
   type: 'error';
   message?: string;
@@ -56,6 +74,7 @@ export type ControlEvent =
   | AgentResult
   | ApprovalRequest
   | ApprovalResolved
+  | EvolutionStatus
   | ServerError;
 
 export type DanmakuDensity = 'all' | 'key' | 'minimal';

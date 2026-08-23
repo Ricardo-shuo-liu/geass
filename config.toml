@@ -43,7 +43,23 @@ image_max_edge = 1568
 # open_terminal 一键执行命令时等待输出的超时（秒）
 terminal_timeout = 15
 # SKILL 目录：相对本项目根目录；每个子目录放一份 SKILL.md
+# 只作为种子目录：启动时同步到运行时 skill_root/.system，运行时从 skill_root 加载
 skills_dir = "skills"
+# 运行时 SKILL 根目录：留空使用 ~/.geass/.skill
+# 系统技能在 .system/，自动进化生成的技能放在根目录下
+skill_root = ""
+# 持久记忆：Agent 跨任务保存用户偏好/环境事实（remember/recall/forget 工具）
+memory_enabled = true
+# 记忆目录路径；留空使用 ~/.geass/.memory（条目保存在 entries.json）
+memory_path = ""
+# 记忆最多保留条目数与每次注入系统提示的条目数
+memory_max_entries = 200
+memory_context_entries = 8
+# 空闲进化：无任务且空闲超过 idle 秒后，结合记忆自动编写新 SKILL
+evolution_enabled = true
+evolution_idle_seconds = 300
+evolution_interval = 1800
+evolution_max_skills = 20
 
 [voice]
 # DeepSeek 等无语音转写接口的端点可留空以禁用兜底转写（端侧识别仍可用）

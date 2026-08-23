@@ -1,6 +1,10 @@
 """SKILL 加载器与渐进披露。
 
-每个技能是 `skills/<name>/SKILL.md` 一个目录；文件使用标准的 YAML
+仓库里的 ``skills/`` 只作为种子目录，启动时同步到运行时目录的
+``.system/``；真正加载从运行时根目录（默认 ``~/.geass/.skill``）
+读取。自动进化生成的技能直接放在运行时根目录，和 ``.system/`` 并列。
+
+每个技能是 ``<skill_root>/<name>/SKILL.md`` 一个目录；文件使用标准的 YAML
 frontmatter（`name` / `description` / 可选元数据）+ Markdown 正文：
 
     ---
@@ -16,10 +20,14 @@ frontmatter（`name` / `description` / 可选元数据）+ Markdown 正文：
 """
 from __future__ import annotations
 
+import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+SYSTEM_DIR = ".system"
 
 FRONTMATTER_RE = re.compile(
     r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL
@@ -92,37 +100,97 @@ def resolve_skills_dir(value: str | Path, config_path: str | Path | None = None)
     return path
 
 
+def resolve_skill_root(
+    value: str | Path | None, config_path: str | Path | None = None
+) -> Path:
+    """解析运行时 SKILL 根目录；留空时默认 ``~/.geass/.skill``。"""
+    if value is None or str(value).strip() == "":
+        home = Path(os.environ.get("GEASS_HOME", str(Path.home())))
+        return (home / ".geass" / ".skill").resolve()
+    return resolve_skills_dir(value, config_path)
+
+
+def _load_skill_dir(skill_dir: Path) -> Skill | None:
+    skill_file = skill_dir / "SKILL.md"
+    if not skill_dir.is_dir() or not skill_file.is_file():
+        return None
+    try:
+        raw = skill_file.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    metadata, body = _parse_frontmatter(raw)
+    name = str(metadata.get("name") or skill_dir.name).strip()
+    description = str(
+        metadata.get("description") or _first_paragraph(body) or name
+    ).strip()
+    return Skill(
+        name=name,
+        description=description,
+        path=skill_dir.resolve(),
+        body=body.strip(),
+        metadata=metadata,
+    )
+
+
+def sync_system_skills(
+    source_dir: str | Path,
+    skill_root: str | Path | None,
+    config_path: str | Path | None = None,
+) -> Path:
+    """把仓库种子目录镜像到运行时 ``<skill_root>/.system``。
+
+    只会改写 ``.system/`` 内部内容；根目录下自动进化的技能不受影响。
+    源目录中已删除的技能也会从镜像中移除。
+    """
+    source = resolve_skills_dir(source_dir, config_path)
+    root = resolve_skill_root(skill_root, config_path)
+    system_dir = root / SYSTEM_DIR
+    system_dir.mkdir(parents=True, exist_ok=True)
+
+    if source.is_dir():
+        for skill_dir in sorted(source.iterdir()):
+            if not skill_dir.is_dir() or not (skill_dir / "SKILL.md").is_file():
+                continue
+            target = system_dir / skill_dir.name
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            shutil.copytree(skill_dir, target)
+
+        for target in sorted(system_dir.iterdir()):
+            if target.is_dir() and not (source / target.name).is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+    return root
+
+
 def load_skills(
-    skills_dir: str | Path, config_path: str | Path | None = None
+    skill_root: str | Path | None,
+    config_path: str | Path | None = None,
 ) -> list[Skill]:
-    root = resolve_skills_dir(skills_dir, config_path)
+    """从运行时根目录加载 SKILL（先系统、后自动进化；同名后者覆盖）。"""
+    root = resolve_skill_root(skill_root, config_path)
     if not root.is_dir():
         return []
 
-    skills: list[Skill] = []
-    for skill_dir in sorted(root.iterdir()):
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_dir.is_dir() or not skill_file.is_file():
-            continue
-        try:
-            raw = skill_file.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        metadata, body = _parse_frontmatter(raw)
-        name = str(metadata.get("name") or skill_dir.name).strip()
-        description = str(
-            metadata.get("description") or _first_paragraph(body) or name
-        ).strip()
-        skills.append(
-            Skill(
-                name=name,
-                description=description,
-                path=skill_dir.resolve(),
-                body=body.strip(),
-                metadata=metadata,
-            )
+    system_dir = root / SYSTEM_DIR
+    directories: list[Path] = []
+    if system_dir.is_dir():
+        directories.extend(
+            item
+            for item in sorted(system_dir.iterdir())
+            if item.is_dir()
         )
-    return skills
+    directories.extend(
+        item
+        for item in sorted(root.iterdir())
+        if item.is_dir() and item.name != SYSTEM_DIR
+    )
+
+    by_name: dict[str, Skill] = {}
+    for skill_dir in directories:
+        skill = _load_skill_dir(skill_dir)
+        if skill is not None:
+            by_name[skill.name] = skill
+    return sorted(by_name.values(), key=lambda skill: skill.name)
 
 
 def catalog_text(skills: list[Skill]) -> str:

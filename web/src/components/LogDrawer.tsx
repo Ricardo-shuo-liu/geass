@@ -15,6 +15,7 @@ function rowClass(event: ControlEvent): string {
   if (event.type === 'approval_resolved') {
     return event.approved ? 'log-approval-ok' : 'log-approval-denied';
   }
+  if (event.type === 'evolution_status') return 'log-evolution';
   if (event.type === 'error') return 'log-error';
   return 'log-result';
 }

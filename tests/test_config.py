@@ -84,6 +84,39 @@ def test_user_env_merged(monkeypatch, tmp_path):
     assert config.api_key == "sk-user"
 
 
+def test_skill_root_and_evolution_defaults(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+
+    config = load_config(path)
+
+    assert config.agent.skill_root == ""
+    assert config.agent.evolution_enabled is True
+    assert config.agent.evolution_idle_seconds == 300.0
+    assert config.agent.evolution_interval == 1800.0
+    assert config.agent.evolution_max_skills == 20
+
+
+def test_evolution_settings_are_validated(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[agent]\nskill_root = ".skill"\n'
+        "evolution_enabled = false\n"
+        "evolution_idle_seconds = 5\n"
+        "evolution_interval = 10\n"
+        "evolution_max_skills = 500\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.agent.skill_root == ".skill"
+    assert config.agent.evolution_enabled is False
+    assert config.agent.evolution_idle_seconds == 30.0
+    assert config.agent.evolution_interval == 60.0
+    assert config.agent.evolution_max_skills == 100
+
+
 def test_env_beats_user_env(monkeypatch, tmp_path):
     project = tmp_path / "config.toml"
     project.write_text("", encoding="utf-8")

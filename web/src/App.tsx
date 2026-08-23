@@ -5,6 +5,7 @@ import { ConnectPanel } from './components/ConnectPanel';
 import { DanmakuPanel } from './components/DanmakuPanel';
 import { DanmakuOverlay } from './components/DanmakuOverlay';
 import { LogDrawer } from './components/LogDrawer';
+import PlanCard from './components/PlanCard';
 import { ScreenView } from './components/ScreenView';
 import { apiInfo, stopAgent, transcribe } from './api';
 import { openControlSocket, openScreenSocket, sendApproval } from './ws';
@@ -14,6 +15,7 @@ import type {
   DanmakuDensity,
   DanmakuIntensity,
   DanmakuSize,
+  TaskPlan,
 } from './types';
 
 const TOKEN_KEY = 'geass-token';
@@ -35,6 +37,7 @@ const INTENSITY_ORDER: DanmakuIntensity[] = ['light', 'standard', 'strong'];
 const BUSY_STATES = [
   'accepted',
   'thinking',
+  'planned',
   'acting',
   'acted',
   'awaiting_approval',
@@ -85,6 +88,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingApproval, setPendingApproval] =
     useState<ApprovalRequest | null>(null);
+  const [plan, setPlan] = useState<TaskPlan | null>(null);
 
   const controlRef = useRef<WebSocket | null>(null);
   const voiceRecRef = useRef<unknown>(null);
@@ -98,6 +102,11 @@ export default function App() {
     setEvents((previous) => [...previous.slice(-(EVENT_LIMIT - 1)), stamped]);
     if (event.type === 'agent_status') {
       setBusy(BUSY_STATES.includes(event.state));
+      if (event.state === 'planned' && event.plan) {
+        setPlan(event.plan);
+      } else if (event.state === 'accepted') {
+        setPlan(null);
+      }
     } else if (event.type === 'approval_request') {
       setBusy(true);
       setPendingApproval(event);
@@ -107,6 +116,7 @@ export default function App() {
       );
     } else if (event.type === 'agent_result') {
       setBusy(false);
+      setPlan(null);
     }
   }, []);
 
@@ -131,6 +141,7 @@ export default function App() {
     setEvents([]);
     setBusy(false);
     setPendingApproval(null);
+    setPlan(null);
     setLogOpen(false);
     setSettingsOpen(false);
   }, []);
@@ -425,6 +436,7 @@ export default function App() {
             onDeny={() => respondApproval(false)}
           />
         )}
+        {plan && <PlanCard plan={plan} onClose={() => setPlan(null)} />}
       </main>
 
       <footer className="dock">

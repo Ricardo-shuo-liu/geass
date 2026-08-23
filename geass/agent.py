@@ -12,12 +12,16 @@ from openai import AsyncOpenAI
 
 from .asyncutil import run_in_thread
 from .config import AgentConfig, SecurityConfig
+from .io import browser
 from .io.backend import InputBackend, InputError
+from .io.browser import BrowserError
 from .io.shell import open_terminal
 from .io.terminal import TerminalError, TerminalManager
+from .memory import Memory
 from .safety import evaluate_command
-from .screen import ScreenCapture
+from .screen import ScreenCapture, image_difference
 from .skills import Skill, catalog_text, find_skill
+from .tasks import TaskPlan
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +43,23 @@ SYSTEM_PROMPT = (
     "的完整说明，再严格按说明执行；不要凭空编造不存在的技能。\n"
     "8. open_terminal 中的高危 shell 命令会先由用户审核；若审核被拒绝或超时，"
     "不要重复提交同一命令，换用其他方式，或调用 finish 说明无法继续。\n"
-    "9. 任务完成或无法继续时，必须调用 finish 并说明结果。"
+    "9. 任务完成或无法继续时，必须调用 finish 并说明结果。\n"
+    "10. 每个任务开始前先判断难度，难度由你决定：简单任务（单步、目标明确、"
+    "一次操作即可完成）可以直接调用工具执行；困难任务（多步骤、跨应用、"
+    "需要新建页面/搜索/等待/验证，或不确定如何完成）必须先调用 plan 工具，"
+    "用 difficulty='hard' 记录目标和完整步骤，再按计划逐步执行并验证。"
+    "不确定时按困难任务处理。\n"
+    "11. 涉及打开浏览器、打开网址、新建标签页/窗口的任务，优先调用 browser "
+    "工具（action 取 open/new_tab/new_window），不要手动寻找并点击浏览器"
+    "图标；浏览器启动后 wait 1~3 秒，可用 screenshot 时用它验证页面状态。"
+    "若 browser 工具失败，可用 open_terminal 执行 xdg-open \"URL\" 兜底，"
+    "但不要反复启动同一个页面。\n"
+    "12. 跨任务有用的信息（用户偏好、常用账号、环境事实、失败原因）用 "
+    "remember 持久化；开始任务前可用 recall 查询相关记忆，避免重复踩坑。\n"
+    "13. 计划中每一步执行后都要验证再进入下一步：优先用 find_text / "
+    "find_element / window_info / screenshot 确认预期状态；工具结果若提示"
+    "屏幕未变化，说明操作可能没生效，应调整坐标或换一种方法重试，"
+    "不要机械重复同一操作。"
 )
 
 
@@ -290,9 +310,116 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "browser",
+        "description": (
+            "用默认浏览器打开网址、新建标签页或新建窗口。比手动点击浏览器"
+            "图标更可靠。action 取 open（打开页面）/new_tab（新建标签页）/"
+            "new_window（新建窗口）；url 缺省时创建空白页。启动是异步的，"
+            "调用后需 wait 1~3 秒，并用 window_info 与 screenshot 验证。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["open", "new_tab", "new_window"],
+                },
+                "url": {"type": "string"},
+            },
+            "required": ["action"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "window_info",
+        "description": (
+            "读取当前活动窗口与可见顶层窗口列表（标题、角色、是否活动、"
+            "屏幕位置）。用于验证浏览器页面、应用窗口是否真的打开，"
+            "或判断当前焦点在哪个应用。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "screenshot",
         "description": "获取最新屏幕截图，帮助确认当前界面状态。",
         "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "plan",
+        "description": (
+            "记录或更新任务计划。困难任务应在执行前先调用本工具："
+            "difficulty 取 easy/hard，goal 为任务目标，steps 为步骤数组。"
+            "执行中可再次调用，用 current_step（1 起）标记当前推进到第几步。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "difficulty": {"type": "string", "enum": ["easy", "hard"]},
+                "goal": {"type": "string"},
+                "steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": 20,
+                },
+                "current_step": {"type": "integer", "minimum": 1},
+            },
+            "required": ["difficulty", "goal", "steps"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "remember",
+        "description": (
+            "把跨任务有用的信息写入持久记忆（按 key 覆盖）。适合保存用户"
+            "偏好、环境事实、常用账号/路径、失败原因等。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["key", "value"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "recall",
+        "description": (
+            "按关键字检索持久记忆，返回相关条目；query 为空时返回最近条目。"
+            "开始不熟悉的任务前先查询相关记忆。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "forget",
+        "description": "按 key 删除一条持久记忆（信息已过时或用户要求忘记时使用）。",
+        "parameters": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}},
+            "required": ["key"],
+            "additionalProperties": False,
+        },
     },
     {
         "type": "function",
@@ -316,9 +443,27 @@ TEXT_ONLY_TOOLS = {
     "terminal_close",
     "list_skills",
     "read_skill",
+    "plan",
+    "browser",
+    "window_info",
+    "remember",
+    "recall",
+    "forget",
     "wait",
     "finish",
 }
+
+MEMORY_TOOL_NAMES = {"remember", "recall", "forget"}
+STATE_CHANGING_TOOLS = {
+    "click",
+    "double_click",
+    "right_click",
+    "drag",
+    "scroll",
+    "type_text",
+    "key_press",
+}
+SCREEN_DIFF_THRESHOLD = 0.003
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]]
 FallbackCallback = Callable[[], None]
@@ -347,6 +492,7 @@ class Agent:
         ocr: Any = None,
         security: SecurityConfig | None = None,
         approval_gateway: Any = None,
+        memory: Memory | None = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -362,6 +508,8 @@ class Agent:
         self.ocr_checked = False
         self.security = security
         self.approval_gateway = approval_gateway
+        self.memory = memory
+        self.plan: TaskPlan | None = None
 
     def resolve_vision(self) -> bool:
         """按 vision_whitelist 决定是否给模型发截图。
@@ -380,7 +528,12 @@ class Agent:
         return self.config.vision
 
     async def _emit(
-        self, state: str, step: int = 0, tool: str | None = None, message: str = ""
+        self,
+        state: str,
+        step: int = 0,
+        tool: str | None = None,
+        message: str = "",
+        **extra: Any,
     ) -> None:
         if self.status_cb is not None:
             await self.status_cb(
@@ -390,6 +543,7 @@ class Agent:
                     "step": step,
                     "tool": tool,
                     "message": message,
+                    **extra,
                 }
             )
 
@@ -498,6 +652,49 @@ class Agent:
                 return await run_in_thread(
                     self.terminal.close, args.get("session_id")
                 )
+            if name == "plan":
+                return self._plan_result(args)
+            if name == "browser":
+                action = str(args.get("action") or "open")
+                url = str(args.get("url") or "")
+                return await run_in_thread(browser.open_page, action, url)
+            if name == "window_info":
+                limit = max(1, min(50, int(args.get("limit") or 20)))
+
+                def _lookup_windows() -> list[dict[str, Any]]:
+                    from .io.accessibility import list_windows
+
+                    return list_windows(limit=limit)
+
+                try:
+                    windows = await run_in_thread(_lookup_windows)
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "error": f"窗口信息读取失败：{exc}",
+                    }
+                active = next(
+                    (window for window in windows if window.get("active")),
+                    None,
+                )
+                active_label = (
+                    active.get("name") or "（无标题窗口）"
+                    if active is not None
+                    else "（未检测到活动窗口）"
+                )
+                return {
+                    "ok": True,
+                    "count": len(windows),
+                    "active_window": active,
+                    "windows": windows,
+                    "message": f"当前活动窗口：{active_label}；共发现 {len(windows)} 个窗口",
+                }
+            if name == "remember":
+                return await run_in_thread(self._remember, args)
+            if name == "recall":
+                return await run_in_thread(self._recall, args)
+            if name == "forget":
+                return await run_in_thread(self._forget, args)
             if name == "find_text":
                 text = str(args.get("text") or "").strip()
                 if not text:
@@ -639,8 +836,71 @@ class Agent:
             if name == "screenshot":
                 return {"ok": True, "message": "已获取最新截图（见下一条消息）"}
             return {"ok": False, "error": f"未知工具：{name}"}
-        except (InputError, TerminalError, KeyError, TypeError, ValueError) as exc:
+        except (
+            InputError,
+            TerminalError,
+            BrowserError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
             return {"ok": False, "error": f"{name} 执行失败：{exc}"}
+
+    def _plan_result(self, args: dict[str, Any]) -> dict[str, Any]:
+        try:
+            plan = TaskPlan.from_args(args)
+        except (TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"计划无效：{exc}"}
+        self.plan = plan
+        return {
+            "ok": True,
+            "message": "计划已记录，请按步骤执行并逐步验证",
+            "plan": plan.to_dict(),
+        }
+
+    def _remember(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.memory is None:
+            return {"ok": False, "error": "记忆系统未启用"}
+        try:
+            entry = self.memory.remember(
+                str(args.get("key") or ""), str(args.get("value") or "")
+            )
+        except (TypeError, ValueError) as exc:
+            return {"ok": False, "error": f"写入记忆失败：{exc}"}
+        return {
+            "ok": True,
+            "message": f"已记住「{entry.key}」",
+            "key": entry.key,
+        }
+
+    def _recall(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.memory is None:
+            return {"ok": False, "error": "记忆系统未启用"}
+        query = str(args.get("query") or "").strip()
+        limit = max(1, min(20, int(args.get("limit") or 8)))
+        entries = self.memory.recall(query, limit=limit)
+        if not entries:
+            return {
+                "ok": True,
+                "found": False,
+                "matches": [],
+                "message": "记忆中没有匹配条目",
+            }
+        return {
+            "ok": True,
+            "found": True,
+            "count": len(entries),
+            "matches": entries,
+            "message": f"找到 {len(entries)} 条相关记忆",
+        }
+
+    def _forget(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.memory is None:
+            return {"ok": False, "error": "记忆系统未启用"}
+        key = str(args.get("key") or "").strip()
+        removed = self.memory.forget(key)
+        message = f"已删除记忆「{key}」" if removed else f"没有找到记忆「{key}」"
+        return {"ok": True, "removed": removed, "message": message}
 
     def _terminal_session(
         self, session_id: Any
@@ -716,6 +976,25 @@ class Agent:
             }
         return None
 
+    def _capture_change_before(self) -> Any:
+        try:
+            return self.capture.capture_image(max_edge=160)
+        except Exception:
+            return None
+
+    async def _capture_change_after(self, before: Any) -> dict[str, Any] | None:
+        """动作后稍等片刻再抓屏，判断界面是否真的发生变化。"""
+        await asyncio.sleep(0.18)
+        try:
+            after = self.capture.capture_image(max_edge=160)
+        except Exception:
+            return None
+        ratio = image_difference(before, after)
+        return {
+            "screen_changed": ratio >= SCREEN_DIFF_THRESHOLD,
+            "screen_change_ratio": round(float(ratio), 4),
+        }
+
     async def run(
         self, command: str, cancel: asyncio.Event | None = None
     ) -> dict[str, Any]:
@@ -725,6 +1004,7 @@ class Agent:
             )
 
         cancel = cancel or asyncio.Event()
+        self.plan = None
         if not self.vision:
             await self._ensure_ocr_ready()
         try:
@@ -809,7 +1089,24 @@ class Agent:
                     return {"state": "done", "message": summary}
 
                 await self._emit("acting", step=step, tool=name, message=f"执行工具 {name}…")
+                before = (
+                    self._capture_change_before()
+                    if name in STATE_CHANGING_TOOLS
+                    else None
+                )
                 result = await self._execute(name, args)
+                change = (
+                    await self._capture_change_after(before)
+                    if before is not None
+                    else None
+                )
+                if change is not None:
+                    result = {**result, **change}
+                    if not change["screen_changed"]:
+                        result["message"] = (
+                            str(result.get("message") or "")
+                            + "；注意：屏幕未检测到变化，操作可能未生效"
+                        ).lstrip("；")
                 messages.append(
                     {
                         "role": "tool",
@@ -823,6 +1120,14 @@ class Agent:
                     tool=name,
                     message=result.get("message") or result.get("error", ""),
                 )
+                if name == "plan" and result.get("ok"):
+                    await self._emit(
+                        "planned",
+                        step=step,
+                        tool="plan",
+                        message=f"已制定{len(result.get('plan', {}).get('steps', []))}步计划",
+                        plan=result.get("plan"),
+                    )
                 if cancel.is_set():
                     return {"state": "cancelled", "message": "任务已被用户中断"}
 
@@ -843,11 +1148,7 @@ class Agent:
             messages.append(
                 {
                     "role": "user",
-                    "content": (
-                        "请根据最新截图决定下一步操作；若任务已完成，调用 finish 总结结果。"
-                        if self.vision
-                        else "请继续完成剩余步骤；若任务已完成，调用 finish 总结结果。"
-                    ),
+                    "content": self._next_instruction(),
                 }
             )
 
@@ -856,10 +1157,30 @@ class Agent:
             "message": f"已达到 {self.config.max_steps} 步上限，任务终止",
         }
 
-    def _system_prompt(self) -> str:
+    def _next_instruction(self) -> str:
+        if self.vision:
+            text = "请根据最新截图决定下一步操作；若任务已完成，调用 finish 总结结果。"
+        else:
+            text = "请继续完成剩余步骤；若任务已完成，调用 finish 总结结果。"
+        if self.plan is not None:
+            text += (
+                "\n\n"
+                + self.plan.render()
+                + "\n请严格按上述计划推进：完成一步后再做下一步，"
+                "每步都要验证结果；进度变化时再次调用 plan 更新 current_step。"
+            )
+        return text
+
+    def _system_prompt(self, command: str = "") -> str:
         prompt = SYSTEM_PROMPT + "\n\n环境信息：" + ENVIRONMENT_HINT
         if self.skills:
             prompt += "\n\n技能规则：\n" + catalog_text(self.skills)
+        if self.memory is not None:
+            context = self.memory.context_for(
+                command, limit=self.config.memory_context_entries
+            )
+            if context:
+                prompt += "\n\n持久记忆（与本任务相关的最近条目）：\n" + context
         if not self.vision:
             if self.ocr is not None and self.ocr_ready:
                 prompt += (
@@ -874,7 +1195,8 @@ class Agent:
                     "不要调用坐标类或截图工具"
                     "（move/click/double_click/right_click/scroll/drag/screenshot），"
                     "仅使用 type_text、key_press、open_terminal、terminal_*、"
-                    "wait 完成键盘与终端类任务。"
+                    "browser、plan、remember、recall、forget、wait 完成键盘、"
+                    "终端与浏览器类任务。"
                 )
         return prompt
 
@@ -883,6 +1205,10 @@ class Agent:
             source = TOOLS
         else:
             source = [tool for tool in TOOLS if tool["name"] in TEXT_ONLY_TOOLS]
+        if self.memory is None:
+            source = [
+                tool for tool in source if tool["name"] not in MEMORY_TOOL_NAMES
+            ]
         # Chat Completions / DeepSeek 要求 function 字段嵌套：
         # {"type":"function","function":{"name":...,"description":...,"parameters":...}}
         return [
@@ -899,7 +1225,7 @@ class Agent:
 
     async def _initial_messages(self, command: str) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt()},
+            {"role": "system", "content": self._system_prompt(command)},
             {"role": "user", "content": command},
         ]
         screen_content = await self._screen_content("当前屏幕状态如下：")

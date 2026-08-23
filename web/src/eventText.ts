@@ -3,6 +3,7 @@ import type { ControlEvent } from './types';
 export const STATE_LABELS: Record<string, string> = {
   accepted: '命令',
   thinking: '思考',
+  planned: '计划',
   acting: '执行',
   acted: 'OK',
   awaiting_approval: '待审核',
@@ -24,8 +25,14 @@ export function renderLine(event: ControlEvent): string {
   if (event.type === 'approval_resolved') {
     return `[审核${event.approved ? '通过' : '拒绝'}]${event.reason ? ` ${event.reason}` : ''}`;
   }
+  if (event.type === 'evolution_status') {
+    return `[进化] ${event.name ? `生成技能 ${event.name}` : event.message}`;
+  }
   if (event.type === 'error') {
     return `[错误] ${event.message ?? ''}`;
+  }
+  if (event.type === 'agent_status' && event.state === 'planned' && event.plan) {
+    return `[计划·${event.plan.difficulty === 'hard' ? '困难' : '简单'}] ${event.plan.goal}（${event.plan.steps.length} 步）`;
   }
   const label = STATE_LABELS[event.state] ?? event.state;
   const parts = [label];
@@ -41,11 +48,17 @@ export function danmakuText(event: ControlEvent): string {
   if (event.type === 'approval_resolved') {
     return event.approved ? '审核通过' : '审核已拒绝';
   }
+  if (event.type === 'evolution_status') {
+    return event.name ? `进化 · ${event.name}` : `进化 · ${event.message}`;
+  }
   if (event.type === 'agent_result') {
     return `完成 · ${event.message}`;
   }
   if (event.type === 'error') {
     return `错误 · ${event.message ?? ''}`;
+  }
+  if (event.type === 'agent_status' && event.state === 'planned' && event.plan) {
+    return `计划 · ${event.plan.difficulty === 'hard' ? '困难' : '简单'} · ${event.plan.goal}`;
   }
   const label = STATE_LABELS[event.state] ?? event.state;
   const parts = [label];
@@ -58,6 +71,7 @@ export function eventStateClass(event: ControlEvent): string {
   if (event.type === 'approval_resolved') {
     return event.approved ? 'approval-ok' : 'approval-pending';
   }
+  if (event.type === 'evolution_status') return 'evolution';
   if (event.type === 'error') return 'error';
   if (event.type === 'agent_result') return event.state;
   return event.state;

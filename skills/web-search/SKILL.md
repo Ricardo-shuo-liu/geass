@@ -13,19 +13,21 @@ description: 当用户要求用浏览器搜索信息、打开网页或访问指�
 
 ### 打开指定网址
 
-1. `open_terminal` 执行 `xdg-open "URL"`（URL 用 https:// 完整地址），
-   浏览器会在前台打开该页面；
+1. 调用 `browser` 工具，`action="open"`，`url` 用 https:// 完整地址；
+   没有 `browser` 工具时退回 `open_terminal` 执行 `xdg-open "URL"`；
 2. `wait` 1~3 秒等页面加载；
-3. `screenshot` 观察页面内容（视觉模式）或读 OCR 文本转写（文本模式）；
+3. `window_info` 确认浏览器窗口已打开，再 `screenshot` 观察页面内容
+   （视觉模式）或读 OCR 文本转写（文本模式）；
 4. 页面没加载出来时再 `wait` 重试，不要反复 `xdg-open`。
 
 ### 搜索引擎搜索
 
-1. `open_terminal` 执行 `xdg-open "https://www.google.com/search?q=关键词"`
+1. `browser` 工具 `action="open"`，url 填
+   `https://www.google.com/search?q=关键词`
    （可用 `bing.com/search?q=` 或 `baidu.com/s?wd=`；关键词含空格用 `%20` 或 `+`）；
 2. `wait` 2~4 秒后 `screenshot` 读取结果列表；
-3. 若要进入某个结果：观察结果标题旁的坐标，`click` 打开，再 `wait` + `screenshot`
-   验证新页面；
+3. 若要进入某个结果：观察结果标题旁的坐标，`click` 打开，再 `wait` +
+   `window_info` + `screenshot` 验证新页面；
 4. 需要翻页或滚动时用 `scroll`（dy<0 向下滚），之后重新观察。
 
 ### 在页面里交互搜索

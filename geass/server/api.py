@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from ..config import load_config, mask_secret, save_user_env
+from ..memory import default_memory_path
 from ..safety import default_patterns
+from ..skills import resolve_skill_root
 from .auth import require_token
 from .state import reload_state
 
@@ -22,6 +24,10 @@ class ConfigUpdate(BaseModel):
     ocr_model: str | None = None
     ocr_base_url: str | None = None
     vision_whitelist: str | None = None
+    memory_enabled: bool | None = None
+    memory_path: str | None = None
+    skill_root: str | None = None
+    evolution_enabled: bool | None = None
     security_enabled: bool | None = None
     approval_timeout: float | None = None
 
@@ -37,6 +43,16 @@ def config_summary(state) -> dict[str, Any]:
         "ocr_token": mask_secret(state.config.agent.ocr_token),
         "ocr_configured": bool(state.config.agent.ocr_token),
         "skills_dir": state.config.agent.skills_dir,
+        "skill_root": state.config.agent.skill_root
+        or str(resolve_skill_root(None)),
+        "evolution_enabled": state.config.agent.evolution_enabled,
+        "evolution_idle_seconds": state.config.agent.evolution_idle_seconds,
+        "evolution_interval": state.config.agent.evolution_interval,
+        "evolution_max_skills": state.config.agent.evolution_max_skills,
+        "memory_enabled": state.config.agent.memory_enabled,
+        "memory_path": state.config.agent.memory_path
+        or str(default_memory_path()),
+        "memory_max_entries": state.config.agent.memory_max_entries,
         "api_key": mask_secret(state.config.api_key),
         "api_configured": bool(state.client),
         "voice_fallback_model": state.config.voice.fallback_model,
@@ -99,6 +115,14 @@ def register(app) -> None:
                 for item in payload.vision_whitelist.split(",")
                 if item.strip()
             ]
+        if payload.memory_enabled is not None:
+            updates["agent"]["memory_enabled"] = payload.memory_enabled
+        if payload.memory_path is not None:
+            updates["agent"]["memory_path"] = payload.memory_path.strip()
+        if payload.skill_root is not None:
+            updates["agent"]["skill_root"] = payload.skill_root.strip()
+        if payload.evolution_enabled is not None:
+            updates["agent"]["evolution_enabled"] = payload.evolution_enabled
         if payload.security_enabled is not None:
             updates["security"]["enabled"] = payload.security_enabled
         if payload.approval_timeout is not None:

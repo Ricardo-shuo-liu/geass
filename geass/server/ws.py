@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .auth import ws_auth
 from .state import AppState, broadcast_control
-from ..skills import load_skills
+from ..skills import load_skills, sync_system_skills
 
 
 def register(app) -> None:
@@ -79,6 +80,7 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
     elif mtype == "stop":
         if state.cancel_event is not None:
             state.cancel_event.set()
+        state.last_activity = time.time()
         await state.approval_manager.reject_all("任务已停止")
         await broadcast_control(
             state,
@@ -132,14 +134,17 @@ async def start_agent(state: AppState, text: str) -> None:
         )
         return
 
+    state.last_activity = time.time()
     # 上一个任务若残留未处理的审核请求，先全部拒绝，避免悬挂。
     await state.approval_manager.reject_all("新任务已开始")
 
-    # 每条命令开始时重新扫描 SKILL 目录：新增/修改技能无需重启服务。
-    state.skills = load_skills(
-        state.config.agent.skills_dir, state.config.config_path
-    )
+    # 每条命令开始时同步种子目录并重新扫描运行时 SKILL：
+    # 仓库修改与空闲进化生成的新技能都无需重启服务即可生效。
+    sync_system_skills(state.skill_source_dir, state.skill_root)
+    state.skills = load_skills(state.skill_root, state.config.config_path)
     state.agent.skills = state.skills
+    if state.evolution is not None:
+        state.evolution.record_task(text)
 
     state.cancel_event = asyncio.Event()
 
@@ -149,6 +154,7 @@ async def start_agent(state: AppState, text: str) -> None:
         except Exception as exc:
             result = {"state": "error", "message": str(exc)}
         await broadcast_control(state, {"type": "agent_result", **result})
+        state.last_activity = time.time()
 
     state.agent_task = asyncio.create_task(run_and_report())
     await broadcast_control(

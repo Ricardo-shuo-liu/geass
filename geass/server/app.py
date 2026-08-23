@@ -19,9 +19,20 @@ def create_app(state: AppState) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         streamer_task = asyncio.create_task(state.streamer.run())
+        evolution_task = (
+            asyncio.create_task(state.evolution.run())
+            if state.evolution is not None
+            else None
+        )
         try:
             yield
         finally:
+            if evolution_task is not None:
+                evolution_task.cancel()
+                try:
+                    await evolution_task
+                except asyncio.CancelledError:
+                    pass
             streamer_task.cancel()
             try:
                 await streamer_task

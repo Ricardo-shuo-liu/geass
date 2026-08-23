@@ -7,6 +7,7 @@ __pycache__/
 .venv/
 node_modules/
 runtime/
+.skill/
 .DS_Store
 .env
 .vscode/settings.json

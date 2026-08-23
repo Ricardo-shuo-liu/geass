@@ -59,7 +59,18 @@ Geass 是一个"手机指挥电脑"的系统：
 - pyautogui 工具集：move/click/double_click/right_click/scroll/drag/type_text/key_press/open_terminal/wait/screenshot/finish；
 - 可见终端会话：`open_terminal` 一键执行并捕获输出，`terminal_type` 流式输入、`terminal_read` 监控输出、`terminal_close` 关闭；
 - PaddleOCR 降级：不支持图像的模型（DeepSeek 等）把屏幕识别为文本 + 文本框中心坐标（AI Studio 远程 jobs API，无需本地安装 Paddle），保留鼠标定位能力；
-- SKILL 生态：扫描 `skills/*/SKILL.md`（YAML frontmatter + Markdown），`list_skills`/`read_skill` 渐进披露；
+- SKILL 生态：仓库 `skills/` 仅作种子，同步到运行时 `<skill_root>/.system`；
+  运行时从 `<skill_root>`（默认 `~/.geass/.skill`）加载，`list_skills`/
+  `read_skill` 渐进披露；
+- 空闲进化系统：无任务且空闲超过阈值时，后台模型根据记忆与最近任务历史
+  自动编写通用 SKILL 写入运行时目录，下次任务生效；
+- 自判难度的任务系统：模型在任务开始时自行判断 easy/hard，困难任务先调用
+  `plan` 记录目标与步骤；执行循环持续注入计划并可更新 `current_step`，
+  每个改变屏幕的动作回填 `screen_changed` 差异检测结果，手机端展示计划卡片；
+- 浏览器工具：`browser` 是上述循环中的确定性原语，执行打开网址 / 新建标签页 /
+  新建窗口（Linux 经 `xdg-open` 与浏览器 CLI，macOS/Windows 尽力而为）；
+- 持久记忆：`remember`/`recall`/`forget` 把跨任务信息写入
+  `~/.geass/.memory`，任务开始前注入相关条目；
 - 手机端 PWA：画面显示、命令框、语音按钮、状态面板、停止按钮；
 - 异地访问助手 `scripts/remote.sh`：Tailscale 或 Cloudflare 临时隧道，手机无需与电脑同一网络；
 - 局域网 + Token 认证。
@@ -69,14 +80,22 @@ Geass 是一个"手机指挥电脑"的系统：
 ## 5. 模块说明
 
 - `geass/paisley_park/` 对应实现中的 `geass/agent.py` + `geass/server/`：Agent 循环、协议、编排；
+- `geass/tasks.py`：任务计划数据模型（difficulty/goal/steps/current_step），
+  由 `plan` 工具驱动；
+- `geass/memory.py`：JSON 文件持久记忆（原子写入、关键字检索、容量上限）；
+- `geass/evolution.py`：空闲进化引擎（活动时间检测、任务历史、模型生成
+  SKILL、事件日志与状态广播）；
 - `geass/safety.py`：高危 shell 命令黑名单策略（不区分大小写正则匹配，返回是否拦截与原因）；
 - `geass/check.py`：`python -m geass.check` 环境自检（密钥只显示是否配置）；
 - `geass/io/backend.py`：InputBackend 抽象与 PyAutoGUI 实现，坐标归一化后在此换算为像素；
 - `geass/io/accessibility.py`：Linux AT-SPI 无障碍树控件查找（供 `find_element` 使用）；conda Python 缺少兼容的 `gi/PyGObject` 时自动切换 `_atspi_bridge.py` 的系统 Python 桥接；
 - `geass/io/_atspi_bridge.py`：独立 AT-SPI 桥接脚本，只依赖标准库和系统 Python 自带的 `pyatspi`；
 - `geass/io/terminal.py`：可见终端会话（命名管道输入 + 日志输出捕获，一键/流式两种输入方式）；
+- `geass/io/browser.py`：默认浏览器打开页面/新建标签页/新建窗口，Linux
+  优先浏览器自带参数，失败回退 `xdg-open`；
 - `geass/ocr.py`：PaddleOCR AI Studio 远程后端（提交截图 → 轮询 jobs → 下载 JSONL → 解析），输出文本 + 归一化坐标转写；
-- `geass/skills.py`：SKILL.md 加载、清单注入与按名读取；
+- `geass/skills.py`：种子目录同步（`sync_system_skills`）、运行时加载、
+  清单注入与按名读取；
 - `geass/asyncutil.py`：阻塞调用（OCR/终端）与事件循环之间的守护线程桥接；
 - `geass/screen.py`：屏幕抓取、缩放、JPEG 编码、帧流广播；
 - `geass/server/`：REST API、WebSocket、认证、共享状态与 `approval.py` 人工审核网关；
@@ -116,12 +135,19 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 - 语义定位工具：`find_text`（PaddleOCR 反查文本，返回文本框中心归一化坐标）、`find_element`（AT-SPI 按控件名/角色查找，返回控件中心归一化坐标）；系统提示要求「点击前先用语义定位拿坐标、能用键盘就用键盘」，避免模型凭空估计坐标；
 - 终端工具：`open_terminal`（开窗 + 一键命令，返回 `session_id`/`output`）、`terminal_type`（流式输入）、`terminal_read`（读取新输出）、`terminal_close`（关闭会话）；
 - 技能工具：`list_skills`（清单）、`read_skill`（按名加载正文与附带文件），符合渐进披露；
-- 系统提示固定规则：每次动作后重新观察截图、只做任务范围内操作、完成时调用 `finish`。
+- 任务与记忆工具：`plan`（记录/更新计划与难度）、`browser`（打开页面/新标签页/新窗口）、
+  `remember`/`recall`/`forget`（持久记忆读写删）；
+- 窗口验证工具：`window_info` 读取活动窗口与可见顶层窗口列表（AT-SPI），
+  与视觉截图一起确认"新窗口/新页面是否真的打开"；
+- 动作反馈：click/key/drag/scroll/type 等工具执行前后各抓一帧做像素差异，
+  结果里附带 `screen_changed`/`screen_change_ratio`；未变化时提示模型换方法；
+- 系统提示固定规则：每次动作后重新观察截图、只做任务范围内操作、
+  困难任务先 `plan` 再执行、浏览器任务优先 `browser`、完成时调用 `finish`。
 
 ## 7. Agent 数据流
 
 ```text
-用户命令 ─▶ 初始截图 ─▶ OpenAI 兼容模型(视觉+工具) ─▶ tool_call(s)
+用户命令 ─▶ 记忆注入 + 初始截图 ─▶ OpenAI 兼容模型(视觉+工具) ─▶ tool_call(s)
                                                     │
                                     执行(pyautogui) │ 结果回填
                                                     ▼
@@ -129,6 +155,13 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 ```
 
 - 底层走 **Chat Completions + 工具调用**（而非 OpenAI 专属 Responses API），因此 OpenAI、DeepSeek 或任意兼容端点都能用；
+- 困难任务模型先调用 `plan`；其后每一步的用户指令会附带计划与进度标记，
+  模型可再次 `plan` 更新 `current_step`，简单任务可跳过规划直接执行；
+- 系统提示在命令开始前注入 `memory` 中最相关的最近条目（默认 8 条），
+  执行中可用 `remember`/`recall`/`forget` 读写删记忆；
+- 验证与恢复是循环的主体：鼠标/键盘只执行动作，动作是否生效由视觉截图、
+  OCR 文本、`window_info` 窗口状态和前后帧差异共同确认；差异检测提示
+  `screen_changed=false` 时模型应换坐标或换方法，而不是盲目重试；
 - 视觉模式发送 JPEG 截图；`agent.vision=false` 且 OCR 可用时，改为发送 PaddleOCR 文本转写（含归一化坐标），工具集保持完整；OCR 不可用才退化为键盘-only；
 - 全程消息累计保留，兼容端点可享受输入缓存折扣；
 - `max_steps` 步数上限防止跑飞；
@@ -141,7 +174,7 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 - `read_skill` 只读取已扫描的 `SKILL.md` 与目录清单，不提供任意文件读取；技能正文只能指引 Agent 使用已有工具；
 - 局域网 + Token（**每次启动随机生成**并在控制台打印，`GEASS_TOKEN` 可显式固定）；
 - 手机端随时可停止；Agent 单任务有步数上限；
-- 隐私：截图会发送至配置的模型服务商；启用 OCR 时还会上传至 PaddleOCR AI Studio API，敏感窗口请自行规避；后续可加本地 OCR/脱敏。
+- 隐私：截图会发送至配置的模型服务商；启用 OCR 时还会上传至 PaddleOCR AI Studio API，敏感窗口请自行规避；持久记忆的匹配条目也会注入系统提示并发送给模型，请勿用 `remember` 保存密码等敏感信息；后续可加本地 OCR/脱敏。
 
 ## 9. 配置
 
@@ -172,9 +205,24 @@ LLM API Key 一样写入 `~/.geass/env.toml`（0600），可用
 
 终端会话：`open_terminal` 弹出可见窗口并把命令输出捕获回填；`agent.terminal_timeout` 控制等待输出上限；会话可继续用 `terminal_type` 流式输入（`interval` 可模拟人类逐字速度）、`terminal_read` 监控增量输出。
 
-SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录放一份 `SKILL.md`。标准格式为 YAML frontmatter（`name`、`description`）+ Markdown 正文；启动时与每条命令开始前重新扫描，把名称与描述注入系统提示，Agent 匹配后调用 `read_skill` 获取全文。
+SKILL：`agent.skills_dir`（默认项目下 `skills/`）只是种子目录，每个子目录放一份 `SKILL.md`（YAML frontmatter + Markdown 正文）；启动时与每条命令开始前同步到 `agent.skill_root`（默认 `~/.geass/.skill`）的 `.system/`，Agent 从运行时根目录重新扫描，把名称与描述注入系统提示，匹配后调用 `read_skill` 获取全文。自动进化生成的技能放在运行时根目录（`.system/` 之外），同名时覆盖系统技能。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒。
+进化：`agent.evolution_enabled`（默认 true）、`agent.evolution_idle_seconds`
+（默认 300，最低 30）、`agent.evolution_interval`（默认 1800，最低 60）、
+`agent.evolution_max_skills`（默认 20，1~100）。后台引擎每 10 秒轮询
+`state.last_activity`；空闲达标后把最多 50 条记忆与最近 40 条任务历史交给
+模型（优先 `response_format=json_object`，失败退回自由文本 JSON），模型
+输出 `create/name/description/body`，校验并落盘到
+`<skill_root>/<name>/SKILL.md`。任务历史与进化事件记录在
+`<skill_root>/.evolution/`（`tasks.jsonl` / `history.jsonl`）。
+
+记忆：`agent.memory_enabled`（默认 true）、`agent.memory_path`（默认
+`~/.geass/.memory`）、`agent.memory_max_entries`（默认 200）、
+`agent.memory_context_entries`（默认 8）。记忆目录与 `env.toml` 同级，
+条目保存在 `entries.json`，写入采用临时文件 + 原子替换；系统提示只注入与
+本任务相关的最近条目。
+
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒、记忆开启、进化开启且空闲 300 秒触发。
 
 ## 10. 路线图
 
@@ -198,11 +246,18 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）下的每个子目录�
 - 手机经局域网 HTTP 访问时 Web Speech API 不可用（需安全上下文），自动走录音上传转写；
 - Service Worker/PWA 安装同样需要安全上下文，局域网下退化为普通网页；
 - 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍可绕过（后续版本扩展）。
-- `find_element` 依赖 Linux 的 AT-SPI；Electron/自绘应用可能不暴露控件树，找不到时模型退回截图估计坐标；Ubuntu/Debian 的 `python3-pyatspi` 需由 apt 安装（不是 pip 包），当 conda 环境的 Python 版本与系统 Python 不同时，会经系统 Python 桥接进程查询。
+- `find_element` 与 `window_info` 依赖 Linux 的 AT-SPI；Electron/自绘应用可能不暴露控件树或窗口标题，找不到时模型退回截图估计坐标；Ubuntu/Debian 的 `python3-pyatspi` 需由 apt 安装（不是 pip 包），当 conda 环境的 Python 版本与系统 Python 不同时，会经系统 Python 桥接进程查询。
+- `browser` 在 Linux 上最可靠：`new_tab`/`new_window` 优先探测
+  Chrome/Chromium/Firefox 等常见浏览器 CLI，找不到才回退 `xdg-open`；
+  macOS/Windows 的新建窗口语义为尽力而为，可能退化为新标签页。
+- 运行时 SKILL 根目录默认在家目录的 `~/.geass/.skill/`（与 `env.toml`、
+  `.memory` 同级，位于仓库之外）；可用 `agent.skill_root` 指向其他位置。
+- 空闲进化会在后台调用模型并产生 token 消耗，同时把记忆与最近任务历史
+  发送给模型；设置 `agent.evolution_enabled=false` 可关闭。
 
 ## 13. 测试与验收
 
-- 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、SKILL 加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检；
-- 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式，以及审核拒绝后继续循环）；WS 认证、帧通道与审核请求/响应往返；
+- 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、前后帧差异检测、SKILL 种子同步与运行时加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检、任务计划解析与渲染、记忆读写/检索/持久化/容量上限、进化引擎的空闲触发/生成/跳过/命名/上限/任务历史；
+- 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式、plan/browser/window_info/memory 工具、屏幕差异反馈，以及审核拒绝后继续循环）；WS 认证、帧通道与审核请求/响应往返；进化引擎生成后下次扫描可见；
 - 真机 E2E：实时画面、文字/语音命令完成"打开应用 + 输入文本"、停止中断、错误 token 拒绝；
 - 验收：局域网 ≥15fps、停止响应 <1s、单任务步数/费用有上限。

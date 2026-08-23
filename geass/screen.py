@@ -12,6 +12,23 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 
+def image_difference(before: Image.Image, after: Image.Image, size: int = 64) -> float:
+    """返回两张图的像素差异率（0~1），用于判断动作是否让屏幕发生变化。
+
+    先把图像转成灰度并缩放到 ``size x size``，再逐像素比较。阈值由调用方
+    决定：不同内容的截图通常差异率明显高于纯鼠标悬停造成的细微变化。
+    """
+    left = before.convert("L").resize((size, size), Image.BILINEAR)
+    right = after.convert("L").resize((size, size), Image.BILINEAR)
+    left_px = left.load()
+    right_px = right.load()
+    total = 0.0
+    for y in range(size):
+        for x in range(size):
+            total += abs(left_px[x, y] - right_px[x, y])
+    return total / (size * size * 255.0)
+
+
 class ScreenCapture:
     def __init__(self, max_width: int = 1920, jpeg_quality: int = 70) -> None:
         self.max_width = max_width

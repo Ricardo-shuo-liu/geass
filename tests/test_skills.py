@@ -4,7 +4,13 @@ import asyncio
 
 from geass.agent import Agent
 from geass.config import AgentConfig
-from geass.skills import catalog_text, find_skill, load_skills
+from geass.skills import (
+    catalog_text,
+    find_skill,
+    load_skills,
+    resolve_skill_root,
+    sync_system_skills,
+)
 
 from .conftest import FakeBackend, FakeCapture
 
@@ -74,3 +80,55 @@ def test_agent_skill_tools_expose_catalog_and_body(tmp_path):
     assert 'echo "hello world"' in read["content"]
     assert "run.sh" in read["content"]
     assert missing["ok"] is False
+
+
+def test_load_skills_reads_system_and_evolved_with_override(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
+    root = resolve_skill_root(None)
+    system = root / ".system"
+    (system / "base").mkdir(parents=True)
+    (system / "base" / "SKILL.md").write_text(
+        "---\nname: base\ndescription: 系统技能\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    (root / "evolved").mkdir(parents=True)
+    (root / "evolved" / "SKILL.md").write_text(
+        "---\nname: base\ndescription: 进化后覆盖\n---\n\nnew body\n",
+        encoding="utf-8",
+    )
+
+    skills = load_skills(root)
+
+    assert [skill.name for skill in skills] == ["base"]
+    assert skills[0].description == "进化后覆盖"
+    assert skills[0].body == "new body"
+
+
+def test_sync_system_skills_copies_and_prunes(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
+    source = tmp_path / "skills"
+    (source / "keep").mkdir(parents=True)
+    (source / "keep" / "SKILL.md").write_text(
+        "---\nname: keep\ndescription: keep\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    root = resolve_skill_root(None)
+    (root / ".system" / "stale").mkdir(parents=True)
+    (root / ".system" / "stale" / "SKILL.md").write_text(
+        "---\nname: stale\ndescription: stale\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    (root / "evolved").mkdir(parents=True)
+    (root / "evolved" / "SKILL.md").write_text(
+        "---\nname: evolved\ndescription: evolved\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+
+    sync_system_skills(source, root)
+    skills = load_skills(root)
+
+    assert (root / ".system" / "keep" / "SKILL.md").is_file()
+    assert not (root / ".system" / "stale").exists()
+    assert {skill.name for skill in skills} == {"keep", "evolved"}
