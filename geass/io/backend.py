@@ -46,7 +46,7 @@ class InputBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def move(self, x: int, y: int) -> None:
+    def move(self, x: int, y: int, duration: float = 0.08) -> None:
         ...
 
     @abc.abstractmethod
@@ -105,8 +105,8 @@ class PyAutoGUIInputBackend(InputBackend):
         width, height = self._pg_ensure().size()
         return int(width), int(height)
 
-    def move(self, x: int, y: int) -> None:
-        self._pg_ensure().moveTo(x, y, duration=0.08)
+    def move(self, x: int, y: int, duration: float = 0.08) -> None:
+        self._pg_ensure().moveTo(x, y, duration=duration)
 
     def click(self, x: int, y: int, button: str = "left") -> None:
         self._pg_ensure().click(x, y, button=button)

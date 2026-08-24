@@ -1,6 +1,9 @@
 # Geass 设计文档
 
 > 本文档是 Geass 的权威设计依据，可直接修订；修订后的内容作为后续实现的输入。
+> 面向用户的详细说明见 [zh/index.md](zh/index.md)（中文）与
+> [en/index.md](en/index.md)（英文）；
+> 项目 README 只保留简介、功能概览与快速开始。
 
 ## 1. 项目定位
 
@@ -64,6 +67,8 @@ Geass 是一个"手机指挥电脑"的系统：
   `read_skill` 渐进披露；
 - 空闲进化系统：无任务且空闲超过阈值时，后台模型根据记忆与最近任务历史
   自动编写通用 SKILL 写入运行时目录，下次任务生效；
+- 手动直控：PWA 触屏 + 网页渲染的虚拟鼠标触摸板/虚拟键盘，经
+  `manual_input` 直接落到 InputBackend，不经过模型，可打断并接管 Agent；
 - 自判难度的任务系统：模型在任务开始时自行判断 easy/hard，困难任务先调用
   `plan` 记录目标与步骤；执行循环持续注入计划并可更新 `current_step`，
   每个改变屏幕的动作回填 `screen_changed` 差异检测结果，手机端展示计划卡片；
@@ -100,6 +105,7 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/asyncutil.py`：阻塞调用（OCR/终端）与事件循环之间的守护线程桥接；
 - `geass/screen.py`：屏幕抓取、缩放、JPEG 编码、帧流广播；
 - `geass/server/`：REST API、WebSocket、认证、共享状态与 `approval.py` 人工审核网关；
+- `geass/server/manual.py`：手动直控协议（归一化坐标/按键 → InputBackend）；
 - `skills/`：用户技能目录，服务启动时扫描；
 - `scripts/setup.sh`：初始化入口，必要时 clone 仓库后交给 `install.sh`；
 - `scripts/install.sh`：按 `geass.yml` 创建/更新 conda 环境、安装项目本体，可顺带安装系统依赖与 web/npm 依赖；
@@ -118,7 +124,7 @@ Geass 是一个"手机指挥电脑"的系统：
 | `POST /api/transcribe` | 上传音频 → whisper-1 转文字（需 Token） |
 | `POST /api/agent/stop` | 停止当前 Agent 任务（需 Token） |
 | `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
-| `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval`，状态与审核事件 |
+| `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval` / `manual_input`，状态与审核事件 |
 
 Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-WebSocket-Protocol` 子协议传递（客户端发送 `["geass", token]`），避免 token 出现在 URL 与访问日志中。
 
@@ -127,6 +133,13 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 - 服务端 → 客户端：`approval_request {type, id, tool, command, reason, expires_in}`、`approval_resolved {type, id, approved}`；
 - 客户端 → 服务端：`approval {type, id, approved}`；
 - 服务端在有挂起请求的新客户端接入时重发 `approval_request`；先到的决定生效，`stop` 或新任务会拒绝全部挂起请求。
+
+手动直控协议（走 `/ws/control`，坐标同样为 0~1 归一化）：
+
+- 客户端 → 服务端：`manual_input {action, ...}`；action 支持
+  `move`/`click`/`double_click`/`right_click`/`drag`/`scroll`/`key`/`type`；
+- 服务端直接换算像素并调用 InputBackend，不回模型；失败时返回 `error`；
+- 若 Agent 任务正在运行，首个 `manual_input` 会置位取消事件，实现接管。
 
 ### 6.2 Agent 工具与坐标约定
 
@@ -227,7 +240,7 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）只是种子目录，�
 
 ## 10. 路线图
 
-- **M2 混合控制**：手动直控模式（触摸 → 鼠标/键盘，含打断与接管）；
+- **M2 混合控制**：手动直控模式（PWA 触屏 + 虚拟键鼠、打断与接管）已落地；
 - **M3 技能生态**：SKILL.md 加载器与渐进披露、PaddleOCR AI Studio 远程识别、基础技能（desktop-automation / terminal-automation / web-search）已落地；待做：沙箱脚本执行、Realtime 语音会话；
 - **M4 平台与传输**：Windows/macOS 权限适配、Wayland（ydotool）、WebRTC 低延迟；Tailscale/Cloudflare 异地访问助手已落地；待做：会话录制回放。
 
@@ -255,6 +268,8 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）只是种子目录，�
   `.memory` 同级，位于仓库之外）；可用 `agent.skill_root` 指向其他位置。
 - 空闲进化会在后台调用模型并产生 token 消耗，同时把记忆与最近任务历史
   发送给模型；设置 `agent.evolution_enabled=false` 可关闭。
+- 手动直控代表用户本人操作，因此绕过 `open_terminal` 审核与 Agent 步数
+  上限；该通道仍受同一 Token 认证保护。
 
 ## 13. 测试与验收
 

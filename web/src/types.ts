@@ -82,3 +82,18 @@ export type DanmakuDensity = 'all' | 'key' | 'minimal';
 export type DanmakuSize = 'small' | 'medium' | 'large';
 
 export type DanmakuIntensity = 'light' | 'standard' | 'strong';
+
+export type ManualAction =
+  | { action: 'move'; x: number; y: number }
+  | {
+      action: 'click';
+      x: number;
+      y: number;
+      button?: 'left' | 'right' | 'middle';
+    }
+  | { action: 'double_click'; x: number; y: number }
+  | { action: 'right_click'; x: number; y: number }
+  | { action: 'drag'; x1: number; y1: number; x2: number; y2: number }
+  | { action: 'scroll'; dx: number; dy: number }
+  | { action: 'key'; combo: string }
+  | { action: 'type'; text: string };

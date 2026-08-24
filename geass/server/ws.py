@@ -7,6 +7,7 @@ import time
 from fastapi import WebSocket, WebSocketDisconnect
 
 from .auth import ws_auth
+from .manual import execute_manual_input
 from .state import AppState, broadcast_control
 from ..skills import load_skills, sync_system_skills
 
@@ -115,6 +116,32 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
                     "type": "error",
                     "message": "审核请求不存在或已处理",
                 }
+            )
+    elif mtype == "manual_input":
+        # 用户开始手动直控时接管：若 Agent 仍在运行则请求它退出。
+        if (
+            state.agent_task
+            and not state.agent_task.done()
+            and state.cancel_event is not None
+        ):
+            state.cancel_event.set()
+            await broadcast_control(
+                state,
+                {
+                    "type": "agent_status",
+                    "state": "cancelling",
+                    "step": 0,
+                    "tool": None,
+                    "message": "用户开始手动直控，Agent 任务将被接管",
+                },
+            )
+        try:
+            result = execute_manual_input(state.backend, message)
+        except Exception as exc:
+            result = {"ok": False, "error": f"手动输入执行失败：{exc}"}
+        if not result.get("ok"):
+            await ws.send_json(
+                {"type": "error", "message": result.get("error", "手动输入失败")}
             )
     else:
         await ws.send_json({"type": "error", "message": f"未知消息类型：{mtype}"})

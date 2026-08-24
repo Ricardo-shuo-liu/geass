@@ -23,7 +23,7 @@ class FakeBackend(InputBackend):
     def _record(self, name: str, *args: Any, **kwargs: Any) -> None:
         self.calls.append((name, args, kwargs))
 
-    def move(self, x, y):
+    def move(self, x, y, duration=None):
         self._record("move", x, y)
 
     def click(self, x, y, button="left"):

@@ -167,6 +167,12 @@ button:disabled {
   border-color: var(--danger);
 }
 
+.tool-btn.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(0, 216, 255, 0.1);
+}
+
 /* ---------- 弹幕设置面板 ---------- */
 .danmaku-panel {
   position: absolute;
@@ -247,6 +253,11 @@ button:disabled {
   object-fit: contain;
 }
 
+.screen-canvas.interactive {
+  touch-action: none;
+  cursor: crosshair;
+}
+
 .screen-placeholder {
   position: absolute;
   inset: 0;
@@ -291,6 +302,13 @@ button:disabled {
   background: rgba(7, 9, 15, 0.86);
   backdrop-filter: blur(4px);
   letter-spacing: 2px;
+}
+
+.gesture-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  touch-action: none;
 }
 
 /* ---------- 弹幕 ---------- */
@@ -664,6 +682,209 @@ button:disabled {
   opacity: 0.8;
 }
 
+/* ---------- 手动直控面板 ---------- */
+.manual-panel {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  z-index: 22;
+  min-height: 180px;
+  max-height: 72vh;
+  overflow: auto;
+  resize: both;
+  padding: 8px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.manual-resize {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  margin: -4px -4px 2px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 2px;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.manual-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.manual-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.manual-toggle {
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(0, 216, 255, 0.12);
+  border: 1px solid rgba(0, 216, 255, 0.35);
+  color: var(--cyan);
+  font-size: 12px;
+}
+
+.manual-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.manual-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 190px;
+}
+
+.manual-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.manual-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 2px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.manual-section-head button {
+  width: 26px;
+  height: 22px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.manual-mouse {
+  display: flex;
+  flex-direction: column;
+  min-height: 92px;
+}
+
+.manual-divider {
+  height: 12px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.manual-keyboard {
+  flex: 1;
+  min-height: 130px;
+  overflow: auto;
+  padding-bottom: 2px;
+}
+
+.touchpad {
+  position: relative;
+  flex: 1;
+  min-height: 70px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(50% 50% at 50% 50%, rgba(0, 216, 255, 0.08), transparent),
+    rgba(0, 0, 0, 0.28);
+  touch-action: none;
+}
+
+.touchpad-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border-radius: 50%;
+  background: rgba(0, 216, 255, 0.9);
+  box-shadow: 0 0 0 5px rgba(0, 216, 255, 0.18);
+  pointer-events: none;
+}
+
+.mouse-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.mouse-buttons button {
+  flex: 1;
+  min-width: 56px;
+  padding: 9px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.virtual-keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vk-row {
+  display: flex;
+  gap: 5px;
+}
+
+.vk-row button {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+
+.vk-mod {
+  color: var(--cyan) !important;
+  font-size: 12px !important;
+}
+
+.vk-mod.active {
+  background: rgba(0, 216, 255, 0.2) !important;
+  border-color: var(--cyan) !important;
+}
+
+.vk-wide {
+  flex: 1.6 !important;
+}
+
 /* ---------- 完整日志抽屉 ---------- */
 .drawer-scrim {
   position: fixed;
@@ -878,6 +1099,29 @@ button:disabled {
   clip-path: polygon(0 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
 }
 
+.connect-token-row {
+  position: relative;
+}
+
+.connect-token-row input {
+  width: 100%;
+  padding-right: 48px;
+}
+
+.token-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 16px;
+}
+
 .connect-panel input:focus {
   border-color: var(--magenta);
   box-shadow: 0 0 16px rgba(255, 46, 136, 0.28);
@@ -938,5 +1182,12 @@ button:disabled {
     right: 24px;
     bottom: 24px;
     width: min(46vw, 420px);
+  }
+
+  .manual-panel {
+    left: auto;
+    right: 24px;
+    bottom: 24px;
+    width: min(60vw, 520px);
   }
 }

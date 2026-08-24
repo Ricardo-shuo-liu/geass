@@ -1,4 +1,4 @@
-import type { ControlEvent } from './types';
+import type { ControlEvent, ManualAction } from './types';
 
 function wsUrl(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -40,5 +40,11 @@ export function sendApproval(
 ): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'approval', id, approved }));
+  }
+}
+
+export function sendManualInput(ws: WebSocket, action: ManualAction): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'manual_input', ...action }));
   }
 }

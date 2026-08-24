@@ -4,17 +4,25 @@ import { CommandBar } from './components/CommandBar';
 import { ConnectPanel } from './components/ConnectPanel';
 import { DanmakuPanel } from './components/DanmakuPanel';
 import { DanmakuOverlay } from './components/DanmakuOverlay';
+import { GestureLayer } from './components/GestureLayer';
 import { LogDrawer } from './components/LogDrawer';
+import { ManualPanel } from './components/ManualPanel';
 import PlanCard from './components/PlanCard';
 import { ScreenView } from './components/ScreenView';
 import { apiInfo, stopAgent, transcribe } from './api';
-import { openControlSocket, openScreenSocket, sendApproval } from './ws';
+import {
+  openControlSocket,
+  openScreenSocket,
+  sendApproval,
+  sendManualInput,
+} from './ws';
 import type {
   ApprovalRequest,
   ControlEvent,
   DanmakuDensity,
   DanmakuIntensity,
   DanmakuSize,
+  ManualAction,
   TaskPlan,
 } from './types';
 
@@ -65,9 +73,7 @@ function initialSetting<T extends string>(
 }
 
 export default function App() {
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem(TOKEN_KEY),
-  );
+  const [token, setToken] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [frame, setFrame] = useState<Blob | null>(null);
@@ -89,6 +95,7 @@ export default function App() {
   const [pendingApproval, setPendingApproval] =
     useState<ApprovalRequest | null>(null);
   const [plan, setPlan] = useState<TaskPlan | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
 
   const controlRef = useRef<WebSocket | null>(null);
   const voiceRecRef = useRef<unknown>(null);
@@ -125,9 +132,10 @@ export default function App() {
     setConnectError(null);
     try {
       await apiInfo(value);
-      localStorage.setItem(TOKEN_KEY, value);
+      localStorage.removeItem(TOKEN_KEY);
       setToken(value);
     } catch (error) {
+      localStorage.removeItem(TOKEN_KEY);
       setConnectError(errorMessage(error));
     } finally {
       setConnecting(false);
@@ -142,6 +150,7 @@ export default function App() {
     setBusy(false);
     setPendingApproval(null);
     setPlan(null);
+    setManualOpen(false);
     setLogOpen(false);
     setSettingsOpen(false);
   }, []);
@@ -200,6 +209,12 @@ export default function App() {
     },
     [pendingApproval],
   );
+
+  const sendManual = useCallback((action: ManualAction) => {
+    const ws = controlRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    sendManualInput(ws, action);
+  }, []);
 
   const changeDensity = useCallback((value: DanmakuDensity) => {
     setDensity(value);
@@ -395,6 +410,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`tool-btn ${manualOpen ? 'active' : ''}`}
+            onClick={() => setManualOpen((value) => !value)}
+            title="手动直控"
+          >
+            直控
+          </button>
+          <button
+            type="button"
             className="tool-btn"
             onClick={() => setLogOpen(true)}
           >
@@ -419,7 +442,17 @@ export default function App() {
       )}
 
       <main className="stage">
-        <ScreenView frame={frame} />
+        <ScreenView
+          frame={frame}
+          interactive={manualOpen}
+          onManualAction={sendManual}
+        />
+        {!manualOpen && (
+          <GestureLayer
+            onDoubleTap={() => setManualOpen(true)}
+            onSwipeUp={() => setLogOpen(true)}
+          />
+        )}
         <DanmakuOverlay
           events={events}
           density={density}
@@ -437,6 +470,12 @@ export default function App() {
           />
         )}
         {plan && <PlanCard plan={plan} onClose={() => setPlan(null)} />}
+        {manualOpen && (
+          <ManualPanel
+            onAction={sendManual}
+            onClose={() => setManualOpen(false)}
+          />
+        )}
       </main>
 
       <footer className="dock">
