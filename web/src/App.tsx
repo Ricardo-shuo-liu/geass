@@ -8,6 +8,7 @@ import { GestureLayer } from './components/GestureLayer';
 import { LogDrawer } from './components/LogDrawer';
 import { ManualPanel } from './components/ManualPanel';
 import PlanCard from './components/PlanCard';
+import { ResourcePanel } from './components/ResourcePanel';
 import { ScreenView } from './components/ScreenView';
 import { apiInfo, stopAgent, transcribe } from './api';
 import {
@@ -96,6 +97,7 @@ export default function App() {
     useState<ApprovalRequest | null>(null);
   const [plan, setPlan] = useState<TaskPlan | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
 
   const controlRef = useRef<WebSocket | null>(null);
   const voiceRecRef = useRef<unknown>(null);
@@ -151,6 +153,7 @@ export default function App() {
     setPendingApproval(null);
     setPlan(null);
     setManualOpen(false);
+    setResourcesOpen(false);
     setLogOpen(false);
     setSettingsOpen(false);
   }, []);
@@ -418,6 +421,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`tool-btn ${resourcesOpen ? 'active' : ''}`}
+            onClick={() => setResourcesOpen((value) => !value)}
+            title="资源管理"
+          >
+            资源
+          </button>
+          <button
+            type="button"
             className="tool-btn"
             onClick={() => setLogOpen(true)}
           >
@@ -474,6 +485,12 @@ export default function App() {
           <ManualPanel
             onAction={sendManual}
             onClose={() => setManualOpen(false)}
+          />
+        )}
+        {resourcesOpen && token && (
+          <ResourcePanel
+            token={token}
+            onClose={() => setResourcesOpen(false)}
           />
         )}
       </main>

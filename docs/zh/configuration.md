@@ -36,6 +36,20 @@
 | `agent.embedding_enabled` | `true` | 是否启用嵌入向量检索 |
 | `agent.embedding_base_url` | 空 | OpenAI 兼容 embeddings 端点；留空走本地词法 |
 | `agent.embedding_model` | `text-embedding-3-small` | 嵌入模型名 |
+| `agent.pot_enabled` | `true` | POT 反思系统开关 |
+| `agent.pot_inject_cot` | `true` | 常驻注入 Global-COT |
+| `agent.pot_inject_rot` | `true` | 按相关性注入 ROT |
+| `agent.pot_rot_hits` | `2` | 注入 ROT 数量（0~5） |
+| `agent.pot_path` | 空 | POT 存储根目录；留空用 `~/.geass/.pot` |
+| `agent.cli_rounds` | `3` | deliberate 辩论轮次 |
+| `agent.cli_subagents` | `3` | deliberate 子代理数量 |
+| `agent.background_enabled` | `true` | 后台任务总开关 |
+| `agent.background_max_tasks` | `10` | 后台任务并发上限 |
+| `agent.evolution_max_tokens` | `2000` | SKILL 进化生成 token 上限 |
+| `agent.pot_reflect_max_tokens` | `2500` | POT 反思生成 token 上限 |
+| `agent.context_compress_enabled` | `true` | 上下文摘要压缩开关 |
+| `agent.context_compress_after` | `18` | 触发压缩的消息条数阈值 |
+| `agent.context_compress_chars` | `20000` | 触发压缩的字符量阈值 |
 | `agent.memory_enabled` | `true` | 是否启用持久记忆（`remember`/`recall`/`forget`） |
 | `agent.memory_path` | 空 | 记忆目录路径；留空用 `~/.geass/.memory`（条目在 `entries.json`） |
 | `agent.memory_max_entries` | `200` | 记忆最多保留的条目数 |

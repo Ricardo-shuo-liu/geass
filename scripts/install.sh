@@ -167,4 +167,4 @@ fi
 
 echo "下一步: 配置 API Key/模型后启动"
 echo "  conda run -n $ENV_NAME python -m geass.config set SK-xxx https://api.deepseek.com deepseek-v4-flash"
-echo "  ./run.sh"
+echo "  ./scripts/run.sh"

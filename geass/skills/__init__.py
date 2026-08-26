@@ -18,6 +18,7 @@ frontmatter（`name` / `description` / 可选元数据）+ Markdown 正文：
 加载时只把「技能清单」注入系统提示；Agent 需要完整说明时再调用
 `read_skill`，实现渐进披露，避免把全部技能正文塞进上下文。
 """
+# 包化后的对外入口：保持 from geass.skills import load_skills 等兼容。
 from __future__ import annotations
 
 import os

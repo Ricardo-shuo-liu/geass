@@ -16,6 +16,7 @@ tomli>=2.0
 python-multipart>=0.0.9
 PyYAML>=6.0
 requests>=2.31
+rich>=13.0
 
 # 测试依赖
 pytest>=8.0

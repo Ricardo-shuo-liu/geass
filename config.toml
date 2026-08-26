@@ -74,6 +74,26 @@ rag_path = ""
 embedding_enabled = true
 embedding_base_url = ""
 embedding_model = "text-embedding-3-small"
+# POT 反思：空闲时从交流痕迹提炼 Global-COT 与角色 ROT
+pot_enabled = true
+pot_inject_cot = true
+pot_inject_rot = true
+pot_rot_hits = 2
+# POT 存储根目录；留空使用 ~/.geass/.pot
+pot_path = ""
+# CLI 思辨模式参数
+cli_rounds = 3
+cli_subagents = 3
+# 后台任务：独立 Agent 并发执行，键鼠动作全局串行
+background_enabled = true
+background_max_tasks = 10
+# 进化成本治理：输入裁剪 + 宽松生成上限（质量优先）
+evolution_max_tokens = 2000
+pot_reflect_max_tokens = 2500
+# 上下文压缩：消息条数/字符量双阈值，摘要替换早期消息
+context_compress_enabled = true
+context_compress_after = 18
+context_compress_chars = 20000
 
 [voice]
 # DeepSeek 等无语音转写接口的端点可留空以禁用兜底转写（端侧识别仍可用）

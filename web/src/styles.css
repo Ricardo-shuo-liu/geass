@@ -683,6 +683,265 @@ button:disabled {
   opacity: 0.8;
 }
 
+/* ---------- 资源管理面板 ---------- */
+.resource-panel {
+  position: absolute;
+  top: calc(54px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 23;
+  width: min(90vw, 400px);
+  max-height: 76vh;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  background: var(--panel-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+}
+
+.resource-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.resource-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.resource-tabs {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.resource-tabs button {
+  flex: 1;
+  padding: 6px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.resource-tabs button.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(0, 216, 255, 0.12);
+}
+
+.resource-error {
+  color: var(--danger);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.resource-body {
+  overflow: auto;
+}
+
+.resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.resource-item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.resource-key {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.resource-value {
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: flex-end;
+}
+
+.resource-mini {
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.resource-mini.danger,
+.resource-danger {
+  background: rgba(255, 59, 92, 0.12);
+  border: 1px solid rgba(255, 59, 92, 0.5);
+  color: var(--danger);
+}
+
+.resource-danger {
+  align-self: flex-start;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.resource-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 8px 0;
+}
+
+.resource-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.resource-form input {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 9px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+}
+
+.resource-add {
+  padding: 8px 0;
+  border-radius: 8px;
+  background: var(--cyan);
+  color: #04222b;
+  font-weight: 700;
+}
+
+.resource-details summary {
+  color: var(--cyan);
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.resource-pre {
+  margin: 0 0 8px;
+  padding: 8px;
+  max-height: 160px;
+  overflow: auto;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.resource-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(5, 7, 12, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.resource-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(94vw, 780px);
+  height: min(80vh, 620px);
+  overflow: hidden;
+  background: var(--panel-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+
+.resource-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  letter-spacing: 1px;
+}
+
+.resource-modal-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.resource-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  width: 104px;
+  padding: 10px;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+}
+
+.resource-nav button {
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.resource-nav button.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: rgba(0, 216, 255, 0.12);
+}
+
+.resource-content {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
 /* ---------- 手动直控面板 ---------- */
 .manual-panel {
   position: absolute;

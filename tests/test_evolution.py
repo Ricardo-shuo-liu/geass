@@ -93,9 +93,9 @@ def test_evolve_once_respects_skill_cap(tmp_path):
 
 
 def test_record_task_persists_and_trims(monkeypatch, tmp_path):
-    import geass.evolution as evolution_module
+    import geass.evolution.engine as evolution_engine_module
 
-    monkeypatch.setattr(evolution_module, "HISTORY_LIMIT", 2)
+    monkeypatch.setattr(evolution_engine_module, "HISTORY_LIMIT", 2)
     engine, _ = build_engine(tmp_path, [])
 
     for text in ("任务一", "任务二", "任务三"):
@@ -108,9 +108,9 @@ def test_record_task_persists_and_trims(monkeypatch, tmp_path):
 
 
 def test_run_evolves_after_idle(monkeypatch, tmp_path):
-    import geass.evolution as evolution_module
+    import geass.evolution.engine as evolution_engine_module
 
-    monkeypatch.setattr(evolution_module, "POLL_INTERVAL", 0.01)
+    monkeypatch.setattr(evolution_engine_module, "POLL_INTERVAL", 0.01)
     engine, _ = build_engine(tmp_path, [])
     engine.config.evolution_idle_seconds = 0.0
     engine.config.evolution_interval = 0.0
@@ -156,3 +156,40 @@ def test_generated_skill_is_loaded_next_scan(tmp_path):
 
     names = {skill.name for skill in load_skills(engine.root)}
     assert "daily-workflow" in names
+
+
+def test_engine_skips_when_tasks_active(monkeypatch, tmp_path):
+    import geass.evolution.engine as engine_module
+
+    monkeypatch.setattr(engine_module, "POLL_INTERVAL", 0.01)
+    engine = EvolutionEngine(
+        client=FakeOpenAI([]),
+        config=AgentConfig(model="x"),
+        memory=None,
+        skill_root=tmp_path / ".skill",
+        source_dir=tmp_path / "skills",
+    )
+    engine.config.evolution_idle_seconds = 0.0
+    engine.config.evolution_interval = 0.0
+    calls = []
+
+    async def fake_evolve():
+        calls.append(True)
+        return {"created": False}
+
+    engine.evolve_once = fake_evolve  # type: ignore[method-assign]
+
+    async def run_once():
+        cancel = asyncio.Event()
+        task = asyncio.create_task(engine.run(cancel))
+        await asyncio.sleep(0.06)
+        cancel.set()
+        await task
+
+    engine.tasks_active = lambda: True
+    asyncio.run(run_once())
+    assert calls == []
+
+    engine.tasks_active = lambda: False
+    asyncio.run(run_once())
+    assert calls

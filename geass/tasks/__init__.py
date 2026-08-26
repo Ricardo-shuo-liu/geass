@@ -4,6 +4,7 @@
 开始时判断简单/困难，困难任务调用 ``plan`` 工具记录目标与步骤；执行
 循环随后把计划作为上下文持续注入，帮助模型保持主线并逐步验证。
 """
+# 包化后的对外入口：保持 from geass.tasks import TaskPlan 兼容。
 from __future__ import annotations
 
 import time

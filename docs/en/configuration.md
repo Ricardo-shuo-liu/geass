@@ -36,6 +36,20 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `agent.embedding_enabled` | `true` | Enable embedding vector retrieval |
 | `agent.embedding_base_url` | empty | OpenAI-compatible embeddings endpoint; empty = lexical |
 | `agent.embedding_model` | `text-embedding-3-small` | Embedding model name |
+| `agent.pot_enabled` | `true` | POT reflection master switch |
+| `agent.pot_inject_cot` | `true` | Always inject Global-COT |
+| `agent.pot_inject_rot` | `true` | Inject relevant ROTs |
+| `agent.pot_rot_hits` | `2` | Number of ROTs to inject (0-5) |
+| `agent.pot_path` | empty | POT storage root; defaults to `~/.geass/.pot` |
+| `agent.cli_rounds` | `3` | Deliberate debate rounds |
+| `agent.cli_subagents` | `3` | Deliberate sub-agent count |
+| `agent.background_enabled` | `true` | Background tasks master switch |
+| `agent.background_max_tasks` | `10` | Background task concurrency cap |
+| `agent.evolution_max_tokens` | `2000` | SKILL evolution generation token cap |
+| `agent.pot_reflect_max_tokens` | `2500` | POT reflection generation token cap |
+| `agent.context_compress_enabled` | `true` | Context compression switch |
+| `agent.context_compress_after` | `18` | Message-count threshold for compression |
+| `agent.context_compress_chars` | `20000` | Character threshold for compression |
 | `agent.memory_enabled` | `true` | Enable persistent memory (`remember`/`recall`/`forget`) |
 | `agent.memory_path` | empty | Memory directory; defaults to `~/.geass/.memory` (entries live in `entries.json`) |
 | `agent.memory_max_entries` | `200` | Maximum number of stored entries |

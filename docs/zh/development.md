@@ -38,7 +38,7 @@ geass/
 ```bash
 pytest                     # 自动发现并运行 tests/ 下全部用例（见 pytest.ini）
 ./scripts/run_tests.sh     # 运行全部测试并把完整输出（含报错）记录到 test.log
-python -m geass.main       # 后端 :8765
+python -m geass serve      # 后端 :8765（等价 python -m geass.main）
 python -m geass.check      # 检查环境与配置是否就绪（密钥只显示是否配置）
 cd web && npm run dev      # 前端热更新 :5173（自动代理到 8765）
 ```

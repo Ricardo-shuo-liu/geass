@@ -136,7 +136,8 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
                 },
             )
         try:
-            result = execute_manual_input(state.backend, message)
+            async with state.input_lock:
+                result = execute_manual_input(state.backend, message)
         except Exception as exc:
             result = {"ok": False, "error": f"手动输入执行失败：{exc}"}
         if not result.get("ok"):
@@ -182,6 +183,11 @@ async def start_agent(state: AppState, text: str) -> None:
             result = {"state": "error", "message": str(exc)}
         await broadcast_control(state, {"type": "agent_result", **result})
         state.last_activity = time.time()
+        if (
+            state.evolution is not None
+            and state.agent.last_trace is not None
+        ):
+            state.evolution.record_trace(state.agent.last_trace)
         return result
 
     state.agent_task = asyncio.create_task(run_and_report())

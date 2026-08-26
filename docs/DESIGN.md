@@ -75,6 +75,16 @@ Geass 是一个"手机指挥电脑"的系统：
 - RAG 检索增强：`geass/rag/` 独立包，锁定本地文件/文件夹数据源、递归读取
   分块、向量（可插拔 OpenAI 兼容 embeddings，faiss 可选）或本地词法检索，
   任务开始自动注入最相关片段并提供按需检索工具；
+- POT 反思：`geass/evolution/` 内含 POT（Global-COT + ROT 模板 + trace），
+  空闲反思自动提炼并注入提示词；
+- CLI 终端助手：`geass/cli/` 独立包，Rich 终端 UI，light/deliberate 双模式
+  复用资产，与手机 GUI 分离；
+- 统一命令：`geass` 分发器（serve/cli/rag/config/check/pot/reset/commands），
+  双确认重置；
+- 后台任务：`geass/server/task_manager.py` 并发独立 Agent，键鼠动作经全局
+  输入锁串行，结果持久化 `~/.geass/.tasks/`，trace 全量入库；
+- 上下文压缩：消息条数/字符量双阈值，摘要替换早期消息，原文存
+  `~/.geass/.tasks/compressed.jsonl`；
 - 自判难度的任务系统：模型在任务开始时自行判断 easy/hard，困难任务先调用
   `plan` 记录目标与步骤；执行循环持续注入计划并可更新 `current_step`，
   每个改变屏幕的动作回填 `screen_changed` 差异检测结果，手机端展示计划卡片；
@@ -95,8 +105,10 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/tasks.py`：任务计划数据模型（difficulty/goal/steps/current_step），
   由 `plan` 工具驱动；
 - `geass/memory.py`：JSON 文件持久记忆（原子写入、关键字检索、容量上限）；
-- `geass/evolution.py`：空闲进化引擎（活动时间检测、任务历史、模型生成
-  SKILL、事件日志与状态广播）；
+- `geass/evolution/`：空闲进化引擎（活动时间检测、任务历史、模型生成
+  SKILL、事件日志与状态广播）+ POT 反思（cot/rot/trace 存储与注入）；
+- `geass/cli/`：终端助手（Rich TUI、light/deliberate 双模式、资产工具）；
+- `geass/cli.py`：统一命令分发器与运维命令；
 - `geass/scheduler.py`：定时任务存储（`~/.geass/.schedule/jobs.json`）与
   后台触发循环（到期执行、忙碌 5 秒重试、状态事件）；
 - `geass/rag/`：RAG 包（store 存储与同名镜像、chunker 分块过滤、
@@ -136,6 +148,9 @@ Geass 是一个"手机指挥电脑"的系统：
 | `GET /api/schedule` | 列出定时任务（需 Token） |
 | `POST /api/schedule` | 添加定时任务 `{command, run_at}`（需 Token） |
 | `DELETE /api/schedule/{id}` | 取消定时任务（需 Token） |
+| `GET /api/resources` | 资源总览（记忆/RAG/技能/POT/定时，需 Token） |
+| `GET/POST/DELETE /api/resources/*` | 资源管理子接口（记忆条目、RAG 源、技能、POT/ROT，需 Token） |
+| `GET/POST /api/tasks`、`POST /api/tasks/{id}/cancel`、`DELETE /api/tasks/{id}` | 后台任务管理（需 Token） |
 | `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
 | `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval` / `manual_input`，状态与审核事件 |
 

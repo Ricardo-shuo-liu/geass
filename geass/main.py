@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import socket
 import struct
+import sys
 
 import uvicorn
 
@@ -51,6 +52,15 @@ def lan_ips() -> list[str]:
     return ips
 
 def main() -> None:
+    extra = [arg for arg in sys.argv[1:] if not arg.startswith("-")]
+    if extra:
+        print(
+            "提示：geass 现在是统一命令入口。查看全部命令请运行 "
+            "`geass commands`（或 `python -m geass help`）；"
+            "启动服务请运行 `geass serve` 或不带任何参数。",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )

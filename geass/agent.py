@@ -5,8 +5,10 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import platform
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from openai import AsyncOpenAI
@@ -66,7 +68,12 @@ SYSTEM_PROMPT = (
     "persist=false 直接创建；只有用户明确要求长期/跨重启/重复执行时才需要"
     "持久化，并且必须先询问用户是否长期保存，用户同意后再询问一次确认"
     "命令与时间，最后带 confirm=true 完成创建；未经用户确认不要带 "
-    "confirm=true。"
+    "confirm=true。\n"
+    "15. 系统提示可能包含 Global-COT 与若干 ROT（角色思维模板）；当用户要求"
+    "以特定角色/视角分析时，可调用 pot_list 查看，并用 pot_use 固定注入的 ROT。"
+    "\n16. 用户要求“后台运行/在后台执行 xxx”时，调用 background 工具把命令"
+    "交给后台任务管理器；后台任务与当前任务并行，键鼠动作仍全局串行，"
+    "结果可在手机资源面板查看。"
 )
 
 
@@ -512,6 +519,40 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "background",
+        "description": (
+            "把一条命令放到后台执行（独立 Agent 实例，与当前任务并行；"
+            "键鼠类动作仍全局串行）。返回 task_id，可用手机资源面板"
+            "查看进度、结果或取消。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "pot_list",
+        "description": "查看 Global-COT 与全部 ROT（角色思维模板）清单。",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "pot_use",
+        "description": (
+            "固定/切换当前注入的 ROT 角色模板；name 留空表示取消固定，"
+            "恢复自动选择。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "finish",
         "description": "任务完成或无法继续时调用，summary 简要说明结果。",
         "parameters": {
@@ -543,6 +584,9 @@ TEXT_ONLY_TOOLS = {
     "rag_search",
     "rag_list",
     "rag_remove",
+    "background",
+    "pot_list",
+    "pot_use",
     "wait",
     "finish",
 }
@@ -589,6 +633,10 @@ class Agent:
         memory: Memory | None = None,
         schedule_store: Any = None,
         rag: Any = None,
+        pot: Any = None,
+        input_lock: Any = None,
+        background_starter: Any = None,
+        compression_path: str | None = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -609,6 +657,13 @@ class Agent:
         self.schedule_store = schedule_store
         self.pending_schedule: dict[str, Any] | None = None
         self.rag = rag
+        self.pot = pot
+        self.pinned_rot: str | None = None
+        self.last_trace: dict[str, Any] | None = None
+        self.input_lock = input_lock
+        self.background_starter = background_starter
+        self.compression_path = compression_path
+        self._compress_watermark = 1
 
     def resolve_vision(self) -> bool:
         """按 vision_whitelist 决定是否给模型发截图。
@@ -804,6 +859,12 @@ class Agent:
                 return await run_in_thread(self._rag_list, args)
             if name == "rag_remove":
                 return await run_in_thread(self._rag_remove, args)
+            if name == "pot_list":
+                return await run_in_thread(self._pot_list, args)
+            if name == "pot_use":
+                return await run_in_thread(self._pot_use, args)
+            if name == "background":
+                return self._background(args)
             if name == "find_text":
                 text = str(args.get("text") or "").strip()
                 if not text:
@@ -961,6 +1022,8 @@ class Agent:
         except (TypeError, ValueError) as exc:
             return {"ok": False, "error": f"计划无效：{exc}"}
         self.plan = plan
+        if self.last_trace is not None:
+            self.last_trace["plan"] = plan.render()
         return {
             "ok": True,
             "message": "计划已记录，请按步骤执行并逐步验证",
@@ -1175,6 +1238,38 @@ class Agent:
             message = f"已删除 RAG 数据源：{source}" if removed else f"数据源不存在：{source}"
         return {"ok": True, "removed": removed, "message": message}
 
+    def _pot_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.pot is None:
+            return {"ok": False, "error": "POT 未启用"}
+        rots = self.pot.list_rots()
+        return {
+            "ok": True,
+            "cot": self.pot.get_cot(),
+            "rots": [rot.to_dict() for rot in rots],
+            "pinned_rot": self.pinned_rot,
+            "message": f"Global-COT：{'有' if self.pot.get_cot() else '无'}；ROT 共 {len(rots)} 个",
+        }
+
+    def _pot_use(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.pot is None:
+            return {"ok": False, "error": "POT 未启用"}
+        name = str(args.get("name") or "").strip()
+        if not name:
+            self.pinned_rot = None
+            return {"ok": True, "pinned_rot": None, "message": "已取消固定 ROT，恢复自动选择"}
+        rot = self.pot.get_rot(name)
+        if rot is None:
+            return {"ok": False, "error": f"ROT 不存在：{name}"}
+        if not rot.enabled:
+            return {"ok": False, "error": f"ROT 已停用：{name}"}
+        self.pinned_rot = rot.name
+        return {"ok": True, "pinned_rot": rot.name, "message": f"已固定 ROT：{rot.name}"}
+
+    def _background(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.background_starter is None:
+            return {"ok": False, "error": "后台任务系统未启用"}
+        return self.background_starter(str(args.get("command") or ""))
+
     def _terminal_session(
         self, session_id: Any
     ) -> tuple[Any, dict[str, Any] | None]:
@@ -1268,6 +1363,126 @@ class Agent:
             "screen_change_ratio": round(float(ratio), 4),
         }
 
+    async def _guarded_action(
+        self, name: str, args: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """执行工具；键鼠类动作在全局输入锁内串行。"""
+        if name in STATE_CHANGING_TOOLS:
+            async def run_with_capture():
+                before = self._capture_change_before()
+                result = await self._execute(name, args)
+                change = (
+                    await self._capture_change_after(before)
+                    if before is not None
+                    else None
+                )
+                return result, change
+
+            if self.input_lock is not None:
+                async with self.input_lock:
+                    return await run_with_capture()
+            return await run_with_capture()
+        return await self._execute(name, args), None
+
+    async def _maybe_compress(self, messages: list[dict[str, Any]]) -> None:
+        if not getattr(self.config, "context_compress_enabled", True):
+            return
+        if self.client is None:
+            return
+        threshold = int(getattr(self.config, "context_compress_after", 18))
+        char_limit = int(getattr(self.config, "context_compress_chars", 20000))
+        if len(messages) < threshold:
+            return
+        total_chars = sum(
+            len(str(message.get("content") or "")) for message in messages
+        )
+        if total_chars < char_limit:
+            return
+        keep = 8
+        end = len(messages) - keep
+        start = self._compress_watermark
+        if start >= end:
+            return
+        segment = messages[start:end]
+        texts = [
+            f"[{message.get('role')}] "
+            + (
+                str(message.get("content"))
+                if isinstance(message.get("content"), str)
+                else "（含图像/复杂内容）"
+            )
+            for message in segment
+        ]
+        label = "【早期对话摘要】\n"
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.config.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是对话压缩器。把给定对话压缩成保留用户意图、"
+                            "计划、已完成步骤、关键结果与结论的中文摘要，"
+                            "只输出摘要正文。"
+                        ),
+                    },
+                    {"role": "user", "content": "\n".join(texts)},
+                ],
+                max_tokens=800,
+            )
+            summary = str(response.choices[0].message.content or "").strip()
+            if not summary:
+                raise ValueError("空摘要")
+        except Exception:
+            logger.warning("上下文压缩失败，降级保留首条用户消息", exc_info=True)
+            first_user = next(
+                (message for message in segment if message.get("role") == "user"),
+                segment[0],
+            )
+            if isinstance(first_user.get("content"), str):
+                summary = str(first_user["content"])[:4000]
+            else:
+                summary = "（早期对话摘要，含图像/复杂内容）"
+            label = "【早期对话摘要（降级）】\n"
+        replacement = [{"role": "user", "content": label + summary}]
+        self._log_compression(segment, summary)
+        messages[start:end] = replacement
+        self._compress_watermark = start + 1
+
+    def _log_compression(
+        self, segment: list[dict[str, Any]], summary: str
+    ) -> None:
+        try:
+            path = Path(
+                self.compression_path
+                or os.path.join(
+                    os.environ.get("GEASS_HOME", str(Path.home())),
+                    ".geass",
+                    ".tasks",
+                    "compressed.jsonl",
+                )
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    json.dumps(
+                        {
+                            "time": time.time(),
+                            "summary": summary,
+                            "segment": segment,
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if len(lines) > 200:
+                path.write_text(
+                    "\n".join(lines[-200:]) + "\n", encoding="utf-8"
+                )
+        except OSError:
+            logger.warning("压缩日志写入失败", exc_info=True)
+
     async def run(
         self, command: str, cancel: asyncio.Event | None = None
     ) -> dict[str, Any]:
@@ -1278,6 +1493,14 @@ class Agent:
 
         cancel = cancel or asyncio.Event()
         self.plan = None
+        self.last_trace = {
+            "time": time.time(),
+            "command": command,
+            "plan": None,
+            "tools": [],
+            "result": None,
+        }
+        self._compress_watermark = 1
         if not self.vision:
             await self._ensure_ocr_ready()
         try:
@@ -1289,9 +1512,11 @@ class Agent:
         tools = self._tools()
         for step in range(1, self.config.max_steps + 1):
             if cancel.is_set():
+                self.last_trace["result"] = "任务已被用户中断"
                 return {"state": "cancelled", "message": "任务已被用户中断"}
 
             await self._emit("thinking", step=step, message="正在观察屏幕并规划下一步…")
+            await self._maybe_compress(messages)
             try:
                 response = await self._create_response(messages, tools)
             except Exception as exc:
@@ -1319,15 +1544,18 @@ class Agent:
                         response = await self._create_response(messages, tools)
                     except Exception as exc2:
                         logger.exception("模型调用失败")
+                        self.last_trace["result"] = f"模型调用失败：{exc2}"
                         return {"state": "error", "message": f"模型调用失败：{exc2}"}
                 else:
                     logger.exception("模型调用失败")
+                    self.last_trace["result"] = f"模型调用失败：{exc}"
                     return {"state": "error", "message": f"模型调用失败：{exc}"}
 
             message = response.choices[0].message
             tool_calls = getattr(message, "tool_calls", None) or []
             if not tool_calls:
                 text = getattr(message, "content", "") or "任务结束（模型未调用工具）"
+                self.last_trace["result"] = text
                 await self._emit("done", step=step, message=text)
                 return {"state": "done", "message": text}
 
@@ -1358,21 +1586,13 @@ class Agent:
 
                 if name == "finish":
                     summary = str(args.get("summary") or "") or "任务完成"
+                    self.last_trace["result"] = summary
                     await self._emit("done", step=step, tool="finish", message=summary)
                     return {"state": "done", "message": summary}
 
                 await self._emit("acting", step=step, tool=name, message=f"执行工具 {name}…")
-                before = (
-                    self._capture_change_before()
-                    if name in STATE_CHANGING_TOOLS
-                    else None
-                )
-                result = await self._execute(name, args)
-                change = (
-                    await self._capture_change_after(before)
-                    if before is not None
-                    else None
-                )
+                self.last_trace["tools"].append(name)
+                result, change = await self._guarded_action(name, args)
                 if change is not None:
                     result = {**result, **change}
                     if not change["screen_changed"]:
@@ -1402,6 +1622,7 @@ class Agent:
                         plan=result.get("plan"),
                     )
                 if cancel.is_set():
+                    self.last_trace["result"] = "任务已被用户中断"
                     return {"state": "cancelled", "message": "任务已被用户中断"}
 
             screen_content = await self._screen_content(
@@ -1425,6 +1646,9 @@ class Agent:
                 }
             )
 
+        self.last_trace["result"] = (
+            f"已达到 {self.config.max_steps} 步上限，任务终止"
+        )
         return {
             "state": "limit",
             "message": f"已达到 {self.config.max_steps} 步上限，任务终止",
@@ -1444,7 +1668,12 @@ class Agent:
             )
         return text
 
-    def _system_prompt(self, command: str = "", rag_context: str = "") -> str:
+    def _system_prompt(
+        self,
+        command: str = "",
+        rag_context: str = "",
+        pot_context: str = "",
+    ) -> str:
         prompt = SYSTEM_PROMPT + "\n\n环境信息：" + ENVIRONMENT_HINT
         if self.skills:
             prompt += "\n\n技能规则：\n" + catalog_text(self.skills)
@@ -1459,6 +1688,8 @@ class Agent:
                 "\n\nRAG 参考资料（来自用户数据源，供回答与执行参考，"
                 "以实际观察到的界面为准）：\n" + rag_context
             )
+        if pot_context:
+            prompt += "\n\n" + pot_context
         if not self.vision:
             if self.ocr is not None and self.ocr_ready:
                 prompt += (
@@ -1503,14 +1734,53 @@ class Agent:
 
     async def _initial_messages(self, command: str) -> list[dict[str, Any]]:
         rag_context = await self._rag_context(command)
+        pot_context = await self._pot_context(command)
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(command, rag_context)},
+            {
+                "role": "system",
+                "content": self._system_prompt(
+                    command, rag_context, pot_context
+                ),
+            },
             {"role": "user", "content": command},
         ]
         screen_content = await self._screen_content("当前屏幕状态如下：")
         if screen_content is not None:
             messages.append(screen_content)
         return messages
+
+    async def _pot_context(self, command: str) -> str:
+        if self.pot is None or not getattr(self.config, "pot_enabled", True):
+            return ""
+
+        def build() -> str:
+            parts: list[str] = []
+            if getattr(self.config, "pot_inject_cot", True):
+                cot = self.pot.get_cot()
+                if cot:
+                    parts.append("## Global-COT（通用思维范式）\n" + cot)
+            hits = max(0, int(getattr(self.config, "pot_rot_hits", 2)))
+            if getattr(self.config, "pot_inject_rot", True) and hits > 0:
+                rots = []
+                if self.pinned_rot:
+                    pinned = self.pot.get_rot(self.pinned_rot)
+                    if pinned is not None and pinned.enabled:
+                        rots.append(pinned)
+                if len(rots) < hits:
+                    rots.extend(
+                        self.pot.select_rots(command, limit=hits - len(rots))
+                    )
+                for rot in rots[:hits]:
+                    parts.append(
+                        f"## ROT「{rot.name}」（{rot.role}）\n{rot.body}"
+                    )
+            return "\n\n".join(parts)
+
+        try:
+            return await run_in_thread(build)
+        except Exception:
+            logger.warning("POT 注入失败，跳过", exc_info=True)
+            return ""
 
     async def _rag_context(self, command: str) -> str:
         if (

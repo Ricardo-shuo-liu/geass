@@ -24,6 +24,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "PyYAML>=6.0",
     "requests>=2.31",
+    "rich>=13.0",
 ]
 [project.urls]
 Homepage = "https://github.com/Ricardo-shuo-liu/geass"
@@ -36,7 +37,7 @@ dev = [
 ]
 
 [project.scripts]
-geass = "geass.main:main"
+geass = "geass.dispatch:main"
 
 [tool.setuptools.packages.find]
 include = ["geass*"]

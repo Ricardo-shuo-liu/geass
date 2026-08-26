@@ -38,7 +38,7 @@ geass/
 ```bash
 pytest                     # auto-discovers all tests under tests/ (see pytest.ini)
 ./scripts/run_tests.sh     # run all tests, log full output to test.log
-python -m geass.main       # backend :8765
+python -m geass serve      # backend :8765 (same as python -m geass.main)
 python -m geass.check      # check env/config readiness (secrets shown as configured/not)
 cd web && npm run dev      # frontend HMR :5173 (proxied to 8765)
 ```

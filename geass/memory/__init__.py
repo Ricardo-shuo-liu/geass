@@ -4,6 +4,7 @@
 条目保存在其中的 ``entries.json``。写入采用临时文件 + 原子替换，多个进程
 同时写时以最后一次替换为准，足够当前"同时只跑一个任务"的使用场景。
 """
+# 包化后的对外入口：保持 from geass.memory import Memory 兼容。
 from __future__ import annotations
 
 import json
@@ -165,6 +166,14 @@ class Memory:
                 return False
             self._save()
         return True
+
+    def clear(self) -> int:
+        with self._lock:
+            count = len(self._entries)
+            if count:
+                self._entries.clear()
+                self._save()
+        return count
 
     def recall(self, query: str = "", limit: int = 10) -> list[dict]:
         """按关键字检索记忆；空查询返回最近更新的条目。"""

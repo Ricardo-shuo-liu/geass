@@ -117,3 +117,71 @@ export type ManualAction =
   | { action: 'scroll'; dx: number; dy: number }
   | { action: 'key'; combo: string }
   | { action: 'type'; text: string };
+
+export interface MemoryEntryResource {
+  key: string;
+  value: string;
+  updated_at?: number;
+}
+
+export interface RagSourceResource {
+  id: string;
+  name: string;
+  root: string;
+  exts: string[];
+  mode: string;
+  enabled: boolean;
+  needs_reindex?: boolean;
+  embedding_model?: string;
+  embedding_dim?: number;
+  files: number;
+  chunks: number;
+}
+
+export interface SkillResource {
+  name: string;
+  description: string;
+  path: string;
+  system: boolean;
+}
+
+export interface RotResource {
+  name: string;
+  description: string;
+  role: string;
+  enabled: boolean;
+}
+
+export interface ScheduleJobResource {
+  id: string;
+  command: string;
+  run_at: number;
+  created_at: number;
+  persistent?: boolean;
+  status: string;
+  message?: string;
+}
+
+export interface BackgroundTaskResource {
+  id: string;
+  command: string;
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+  status: string;
+  message?: string;
+  result?: { state?: string; message?: string };
+}
+
+export interface ResourceSummary {
+  memory: { enabled: boolean; entries: MemoryEntryResource[] };
+  rag: { enabled: boolean; sources: RagSourceResource[] };
+  skills: SkillResource[];
+  pot: { enabled: boolean; cot: string; rots: RotResource[] };
+  schedule: { jobs: ScheduleJobResource[] };
+  background: {
+    enabled: boolean;
+    max: number;
+    tasks: BackgroundTaskResource[];
+  };
+}

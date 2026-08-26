@@ -1,6 +1,8 @@
 """REST 接口：健康检查、信息、配置、语音兜底转写、停止 Agent。"""
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -9,7 +11,7 @@ from pydantic import BaseModel
 from ..config import load_config, mask_secret, save_user_env
 from ..memory import default_memory_path
 from ..safety import default_patterns
-from ..skills import resolve_skill_root
+from ..skills import find_skill, resolve_skill_root
 from .auth import require_token
 from .state import reload_state
 
@@ -36,6 +38,24 @@ class ScheduleAdd(BaseModel):
     command: str
     run_at: float
     persistent: bool = True
+
+
+class RAGAdd(BaseModel):
+    path: str
+    name: str | None = None
+    extensions: str | None = None
+
+
+class EnabledUpdate(BaseModel):
+    enabled: bool
+
+
+class COTUpdate(BaseModel):
+    cot: str
+
+
+class TaskAdd(BaseModel):
+    command: str
 
 
 def config_summary(state) -> dict[str, Any]:
@@ -208,6 +228,282 @@ def register(app) -> None:
             raise HTTPException(status_code=503, detail="定时系统不可用")
         if not state.schedule_store.remove(job_id):
             raise HTTPException(status_code=404, detail="定时任务不存在或已处理")
+        return {"ok": True}
+
+    @router.get("/api/resources", dependencies=[Depends(require_token)])
+    async def resource_summary(request: Request):
+        state = request.app.state.geass
+        memory_entries = (
+            state.memory.recall("", limit=50) if state.memory is not None else []
+        )
+        rag_sources = state.rag.list_sources() if state.rag is not None else []
+        skills = [
+            {
+                "name": skill.name,
+                "description": skill.description,
+                "path": str(skill.path),
+                "system": ".system" in skill.path.parts,
+            }
+            for skill in state.agent.skills
+        ]
+        cot = state.pot.get_cot() if state.pot is not None else ""
+        rots = (
+            [
+                {
+                    "name": rot.name,
+                    "description": rot.description,
+                    "role": rot.role,
+                    "enabled": rot.enabled,
+                }
+                for rot in state.pot.list_rots()
+            ]
+            if state.pot is not None
+            else []
+        )
+        jobs = (
+            [job.to_dict() for job in state.schedule_store.list()]
+            if state.schedule_store is not None
+            else []
+        )
+        return {
+            "memory": {
+                "enabled": state.memory is not None,
+                "entries": memory_entries,
+            },
+            "rag": {"enabled": state.rag is not None, "sources": rag_sources},
+            "skills": skills,
+            "pot": {"enabled": state.pot is not None, "cot": cot, "rots": rots},
+            "schedule": {"jobs": jobs},
+            "background": (
+                {
+                    "enabled": state.task_manager.enabled,
+                    "max": state.task_manager.max_tasks,
+                    "tasks": state.task_manager.list(),
+                }
+                if state.task_manager is not None
+                else {"enabled": False, "max": 0, "tasks": []}
+            ),
+        }
+
+    @router.get("/api/resources/memory", dependencies=[Depends(require_token)])
+    async def list_memory(request: Request):
+        state = request.app.state.geass
+        if state.memory is None:
+            raise HTTPException(status_code=503, detail="记忆未启用")
+        return {"entries": state.memory.recall("", limit=100)}
+
+    @router.delete("/api/resources/memory", dependencies=[Depends(require_token)])
+    async def clear_memory(request: Request):
+        state = request.app.state.geass
+        if state.memory is None:
+            raise HTTPException(status_code=503, detail="记忆未启用")
+        return {"ok": True, "removed": state.memory.clear()}
+
+    @router.delete(
+        "/api/resources/memory/{key}", dependencies=[Depends(require_token)]
+    )
+    async def delete_memory(request: Request, key: str):
+        state = request.app.state.geass
+        if state.memory is None:
+            raise HTTPException(status_code=503, detail="记忆未启用")
+        if not state.memory.forget(key):
+            raise HTTPException(status_code=404, detail="记忆条目不存在")
+        return {"ok": True}
+
+    @router.post("/api/resources/rag", dependencies=[Depends(require_token)])
+    async def add_rag_source(request: Request, payload: RAGAdd):
+        state = request.app.state.geass
+        if state.rag is None:
+            raise HTTPException(status_code=503, detail="RAG 未启用")
+        exts = (
+            [
+                item.strip()
+                for item in payload.extensions.split(",")
+                if item.strip()
+            ]
+            if payload.extensions
+            else None
+        )
+        try:
+            return state.rag.add_source(
+                payload.path, name=payload.name, exts=exts
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.delete(
+        "/api/resources/rag/{source}", dependencies=[Depends(require_token)]
+    )
+    async def remove_rag_source(request: Request, source: str):
+        state = request.app.state.geass
+        if state.rag is None or not state.rag.remove_source(source):
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        return {"ok": True}
+
+    @router.delete(
+        "/api/resources/rag/{source}/file",
+        dependencies=[Depends(require_token)],
+    )
+    async def remove_rag_file(request: Request, source: str, rel_path: str):
+        state = request.app.state.geass
+        if state.rag is None or not state.rag.remove_file(source, rel_path):
+            raise HTTPException(status_code=404, detail="文件镜像不存在")
+        return {"ok": True}
+
+    @router.post(
+        "/api/resources/rag/{source}/enabled",
+        dependencies=[Depends(require_token)],
+    )
+    async def set_rag_enabled(
+        request: Request, source: str, payload: EnabledUpdate
+    ):
+        state = request.app.state.geass
+        if state.rag is None or not state.rag.set_enabled(
+            source, payload.enabled
+        ):
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        return {"ok": True}
+
+    @router.post(
+        "/api/resources/rag/{source}/reindex",
+        dependencies=[Depends(require_token)],
+    )
+    async def reindex_rag(request: Request, source: str):
+        state = request.app.state.geass
+        result = state.rag.reindex(source) if state.rag is not None else None
+        if result is None or not result.get("ok"):
+            raise HTTPException(status_code=404, detail="数据源不存在")
+        return result
+
+    @router.get("/api/resources/skills", dependencies=[Depends(require_token)])
+    async def list_skill_resources(request: Request):
+        state = request.app.state.geass
+        return {
+            "skills": [
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "path": str(skill.path),
+                    "system": ".system" in skill.path.parts,
+                }
+                for skill in state.agent.skills
+            ]
+        }
+
+    @router.get(
+        "/api/resources/skills/{name}", dependencies=[Depends(require_token)]
+    )
+    async def get_skill_resource(request: Request, name: str):
+        state = request.app.state.geass
+        skill = find_skill(state.agent.skills, name)
+        if skill is None:
+            raise HTTPException(status_code=404, detail="技能不存在")
+        return {
+            "name": skill.name,
+            "description": skill.description,
+            "content": skill.body,
+            "files": skill.files(),
+        }
+
+    @router.delete(
+        "/api/resources/skills/{name}", dependencies=[Depends(require_token)]
+    )
+    async def delete_skill_resource(request: Request, name: str):
+        state = request.app.state.geass
+        skill = find_skill(state.agent.skills, name)
+        if skill is None:
+            raise HTTPException(status_code=404, detail="技能不存在")
+        skill_root = Path(state.skill_root) if state.skill_root else None
+        skill_path = Path(skill.path)
+        if skill_root is None or not skill_path.is_relative_to(skill_root):
+            raise HTTPException(status_code=403, detail="技能不在运行时目录内")
+        shutil.rmtree(skill_path, ignore_errors=True)
+        return {"ok": True, "removed": name}
+
+    @router.get("/api/resources/pot", dependencies=[Depends(require_token)])
+    async def get_pot_resources(request: Request):
+        state = request.app.state.geass
+        if state.pot is None:
+            raise HTTPException(status_code=503, detail="POT 未启用")
+        return {
+            "cot": state.pot.get_cot(),
+            "rots": [
+                {
+                    "name": rot.name,
+                    "description": rot.description,
+                    "role": rot.role,
+                    "enabled": rot.enabled,
+                }
+                for rot in state.pot.list_rots()
+            ],
+        }
+
+    @router.put("/api/resources/pot/cot", dependencies=[Depends(require_token)])
+    async def update_pot_cot(request: Request, payload: COTUpdate):
+        state = request.app.state.geass
+        if state.pot is None:
+            raise HTTPException(status_code=503, detail="POT 未启用")
+        if not payload.cot.strip():
+            raise HTTPException(status_code=400, detail="COT 内容不能为空")
+        state.pot.set_cot(payload.cot)
+        return {"ok": True}
+
+    @router.delete(
+        "/api/resources/pot/rot/{name}", dependencies=[Depends(require_token)]
+    )
+    async def delete_pot_rot(request: Request, name: str):
+        state = request.app.state.geass
+        if state.pot is None or not state.pot.delete_rot(name):
+            raise HTTPException(status_code=404, detail="ROT 不存在")
+        return {"ok": True}
+
+    @router.post(
+        "/api/resources/pot/rot/{name}/enabled",
+        dependencies=[Depends(require_token)],
+    )
+    async def set_pot_rot_enabled(
+        request: Request, name: str, payload: EnabledUpdate
+    ):
+        state = request.app.state.geass
+        if state.pot is None or not state.pot.set_rot_enabled(
+            name, payload.enabled
+        ):
+            raise HTTPException(status_code=404, detail="ROT 不存在")
+        return {"ok": True}
+
+    @router.get("/api/tasks", dependencies=[Depends(require_token)])
+    async def list_background_tasks(request: Request):
+        state = request.app.state.geass
+        if state.task_manager is None:
+            raise HTTPException(status_code=503, detail="后台任务未启用")
+        return {"tasks": state.task_manager.list()}
+
+    @router.post("/api/tasks", dependencies=[Depends(require_token)])
+    async def start_background_task(request: Request, payload: TaskAdd):
+        state = request.app.state.geass
+        if state.task_manager is None:
+            raise HTTPException(status_code=503, detail="后台任务未启用")
+        result = state.task_manager.start(payload.command)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return result
+
+    @router.post(
+        "/api/tasks/{task_id}/cancel", dependencies=[Depends(require_token)]
+    )
+    async def cancel_background_task(request: Request, task_id: str):
+        state = request.app.state.geass
+        if state.task_manager is None or not state.task_manager.cancel(task_id):
+            raise HTTPException(status_code=404, detail="后台任务不存在或已结束")
+        return {"ok": True}
+
+    @router.delete(
+        "/api/tasks/{task_id}", dependencies=[Depends(require_token)]
+    )
+    async def remove_background_task(request: Request, task_id: str):
+        state = request.app.state.geass
+        if state.task_manager is None or not state.task_manager.remove(task_id):
+            raise HTTPException(status_code=404, detail="后台任务不存在")
         return {"ok": True}
 
     app.include_router(router)

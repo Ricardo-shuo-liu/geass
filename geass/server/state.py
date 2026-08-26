@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 
 from ..agent import Agent
 from ..config import Config, save_user_env
-from ..evolution import EvolutionEngine
+from ..evolution import EvolutionEngine, POTStore
 from ..io.backend import InputBackend, PyAutoGUIInputBackend
 from ..io.terminal import TerminalManager
 from ..memory import Memory
@@ -26,6 +26,7 @@ from ..skills import (
     sync_system_skills,
 )
 from .approval import ApprovalManager
+from .task_manager import BackgroundTaskManager
 
 
 @dataclass
@@ -46,6 +47,9 @@ class AppState:
     schedule_store: ScheduleStore | None = None
     scheduler: Scheduler | None = None
     rag: RAGManager | None = None
+    pot: POTStore | None = None
+    input_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    task_manager: BackgroundTaskManager | None = None
     last_activity: float = field(default_factory=time.time)
     approval_manager: ApprovalManager = field(default_factory=ApprovalManager)
     control_clients: set = field(default_factory=set)
@@ -111,6 +115,11 @@ def build_state(config: Config) -> AppState:
         if config.agent.rag_enabled
         else None
     )
+    pot = (
+        POTStore(config.agent.pot_path or None)
+        if config.agent.pot_enabled
+        else None
+    )
 
     state = AppState(
         config=config,
@@ -127,25 +136,16 @@ def build_state(config: Config) -> AppState:
         memory=memory,
         schedule_store=schedule_store,
         rag=rag,
+        pot=pot,
         approval_manager=approval_manager,
     )
     approval_manager.broadcast = lambda message: broadcast_control(state, message)
-    state.agent = Agent(
-        client=client,
-        backend=backend,
-        capture=capture,
-        config=config.agent,
-        status_cb=lambda message: broadcast_control(state, message),
-        vision_fallback_cb=lambda: save_user_env({"agent": {"vision": False}}),
-        skills=skills,
-        terminal=terminal_manager,
-        ocr=ocr,
-        security=config.security,
-        approval_gateway=approval_manager.request,
-        memory=memory,
-        schedule_store=schedule_store,
-        rag=rag,
+    state.task_manager = BackgroundTaskManager(
+        state,
+        max_tasks=config.agent.background_max_tasks,
+        enabled=config.agent.background_enabled,
     )
+    state.agent = make_agent(state)
     state.evolution = (
         EvolutionEngine(
             client=client,
@@ -155,6 +155,8 @@ def build_state(config: Config) -> AppState:
             source_dir=skill_source_dir,
             status_cb=lambda message: broadcast_control(state, message),
             activity_since=lambda: state.last_activity,
+            pot=pot,
+            tasks_active=lambda: _tasks_active(state),
         )
         if client is not None
         else None
@@ -213,6 +215,18 @@ def reload_state(state: AppState, config: Config) -> None:
         else None
     )
     state.agent.rag = state.rag
+    state.pot = (
+        POTStore(config.agent.pot_path or None)
+        if config.agent.pot_enabled
+        else None
+    )
+    state.agent.pot = state.pot
+    if state.evolution is not None:
+        state.evolution.pot = state.pot
+    if state.task_manager is not None:
+        state.task_manager.max_tasks = config.agent.background_max_tasks
+        state.task_manager.enabled = config.agent.background_enabled
+    state.agent = make_agent(state)
     if state.scheduler is not None:
         state.scheduler.store = state.schedule_store
     else:
@@ -238,6 +252,7 @@ def reload_state(state: AppState, config: Config) -> None:
                 source_dir=state.skill_source_dir,
                 status_cb=lambda message: broadcast_control(state, message),
                 activity_since=lambda: state.last_activity,
+                tasks_active=lambda: _tasks_active(state),
             )
             if client is not None
             else None
@@ -275,3 +290,39 @@ def _run_scheduled_job(state: AppState):
         return await task
 
     return run_job
+
+
+def make_agent(state: AppState, status_cb=None) -> Agent:
+    """构造 Agent（前台或后台共用同一套依赖与输入锁）。"""
+    return Agent(
+        client=state.client,
+        backend=state.backend,
+        capture=state.capture,
+        config=state.config.agent,
+        status_cb=status_cb
+        or (lambda message: broadcast_control(state, message)),
+        vision_fallback_cb=lambda: save_user_env({"agent": {"vision": False}}),
+        skills=state.skills,
+        terminal=state.terminal_manager,
+        ocr=state.ocr,
+        security=state.config.security,
+        approval_gateway=state.approval_manager.request,
+        memory=state.memory,
+        schedule_store=state.schedule_store,
+        rag=state.rag,
+        pot=state.pot,
+        input_lock=state.input_lock,
+        background_starter=(
+            state.task_manager.start if state.task_manager is not None else None
+        ),
+    )
+
+
+def _tasks_active(state: AppState) -> bool:
+    foreground_busy = (
+        state.agent_task is not None and not state.agent_task.done()
+    )
+    background_busy = (
+        state.task_manager is not None and state.task_manager.tasks_active()
+    )
+    return foreground_busy or background_busy

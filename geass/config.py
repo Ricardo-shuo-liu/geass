@@ -83,6 +83,20 @@ class AgentConfig:
     embedding_enabled: bool = True
     embedding_base_url: str = ""
     embedding_model: str = "text-embedding-3-small"
+    pot_enabled: bool = True
+    pot_inject_cot: bool = True
+    pot_inject_rot: bool = True
+    pot_rot_hits: int = 2
+    pot_path: str = ""
+    cli_rounds: int = 3
+    cli_subagents: int = 3
+    background_enabled: bool = True
+    background_max_tasks: int = 10
+    evolution_max_tokens: int = 2000
+    pot_reflect_max_tokens: int = 2500
+    context_compress_enabled: bool = True
+    context_compress_after: int = 18
+    context_compress_chars: int = 20000
 
 
 @dataclass
@@ -424,6 +438,129 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
         )
         or "text-embedding-3-small"
     )
+    pot_enabled = bool(
+        pick(u_agent, "pot_enabled", pick(p_agent, "pot_enabled", True))
+    )
+    pot_inject_cot = bool(
+        pick(
+            u_agent,
+            "pot_inject_cot",
+            pick(p_agent, "pot_inject_cot", True),
+        )
+    )
+    pot_inject_rot = bool(
+        pick(
+            u_agent,
+            "pot_inject_rot",
+            pick(p_agent, "pot_inject_rot", True),
+        )
+    )
+    pot_rot_hits = max(
+        0,
+        min(
+            5,
+            int(pick(u_agent, "pot_rot_hits", pick(p_agent, "pot_rot_hits", 2))),
+        ),
+    )
+    pot_path = str(
+        pick(u_agent, "pot_path", pick(p_agent, "pot_path", "")) or ""
+    )
+    cli_rounds = max(
+        1,
+        min(
+            10,
+            int(
+                pick(
+                    u_agent,
+                    "cli_rounds",
+                    pick(p_agent, "cli_rounds", 3),
+                )
+            ),
+        ),
+    )
+    cli_subagents = max(
+        1,
+        min(
+            6,
+            int(
+                pick(
+                    u_agent,
+                    "cli_subagents",
+                    pick(p_agent, "cli_subagents", 3),
+                )
+            ),
+        ),
+    )
+    background_enabled = bool(
+        pick(
+            u_agent,
+            "background_enabled",
+            pick(p_agent, "background_enabled", True),
+        )
+    )
+    background_max_tasks = max(
+        1,
+        min(
+            50,
+            int(
+                pick(
+                    u_agent,
+                    "background_max_tasks",
+                    pick(p_agent, "background_max_tasks", 10),
+                )
+            ),
+        ),
+    )
+    evolution_max_tokens = max(
+        200,
+        int(
+            pick(
+                u_agent,
+                "evolution_max_tokens",
+                pick(p_agent, "evolution_max_tokens", 2000),
+            )
+        ),
+    )
+    pot_reflect_max_tokens = max(
+        200,
+        int(
+            pick(
+                u_agent,
+                "pot_reflect_max_tokens",
+                pick(p_agent, "pot_reflect_max_tokens", 2500),
+            )
+        ),
+    )
+    context_compress_enabled = bool(
+        pick(
+            u_agent,
+            "context_compress_enabled",
+            pick(p_agent, "context_compress_enabled", True),
+        )
+    )
+    context_compress_after = max(
+        4,
+        min(
+            100,
+            int(
+                pick(
+                    u_agent,
+                    "context_compress_after",
+                    pick(p_agent, "context_compress_after", 18),
+                )
+            ),
+        ),
+    )
+    context_compress_chars = max(
+        4000,
+        int(
+            pick(
+                u_agent,
+                "context_compress_chars",
+                pick(p_agent, "context_compress_chars", 20000),
+            )
+        ),
+    )
     security_enabled = bool(
         pick(u_security, "enabled", pick(p_security, "enabled", True))
     )
@@ -491,6 +628,20 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             embedding_enabled=embedding_enabled,
             embedding_base_url=embedding_base_url,
             embedding_model=embedding_model,
+            pot_enabled=pot_enabled,
+            pot_inject_cot=pot_inject_cot,
+            pot_inject_rot=pot_inject_rot,
+            pot_rot_hits=pot_rot_hits,
+            pot_path=pot_path,
+            cli_rounds=cli_rounds,
+            cli_subagents=cli_subagents,
+            background_enabled=background_enabled,
+            background_max_tasks=background_max_tasks,
+            evolution_max_tokens=evolution_max_tokens,
+            pot_reflect_max_tokens=pot_reflect_max_tokens,
+            context_compress_enabled=context_compress_enabled,
+            context_compress_after=context_compress_after,
+            context_compress_chars=context_compress_chars,
         ),
         security=SecurityConfig(
             enabled=security_enabled,
@@ -642,6 +793,76 @@ def main() -> None:
         help="嵌入模型名（默认 text-embedding-3-small）",
     )
     set_parser.add_argument(
+        "--pot-enabled",
+        choices=["true", "false"],
+        help="POT 反思系统开关（默认 true）",
+    )
+    set_parser.add_argument(
+        "--pot-inject-cot",
+        choices=["true", "false"],
+        help="是否常驻注入 Global-COT（默认 true）",
+    )
+    set_parser.add_argument(
+        "--pot-inject-rot",
+        choices=["true", "false"],
+        help="是否按相关性注入 ROT（默认 true）",
+    )
+    set_parser.add_argument(
+        "--pot-rot-hits",
+        type=int,
+        help="注入 ROT 数量（0~5，默认 2）",
+    )
+    set_parser.add_argument(
+        "--pot-path", help="POT 存储根目录（默认 ~/.geass/.pot）"
+    )
+    set_parser.add_argument(
+        "--cli-rounds",
+        dest="cli_rounds",
+        type=int,
+        help="deliberate 辩论轮次（1~10，默认 3）",
+    )
+    set_parser.add_argument(
+        "--cli-subagents",
+        dest="cli_subagents",
+        type=int,
+        help="deliberate 子代理数量（1~6，默认 3）",
+    )
+    set_parser.add_argument(
+        "--background-enabled",
+        choices=["true", "false"],
+        help="是否启用后台任务（默认 true）",
+    )
+    set_parser.add_argument(
+        "--background-max-tasks",
+        type=int,
+        help="后台任务并发上限（1~50，默认 10）",
+    )
+    set_parser.add_argument(
+        "--evolution-max-tokens",
+        type=int,
+        help="SKILL 进化生成 token 上限（默认 2000）",
+    )
+    set_parser.add_argument(
+        "--pot-reflect-max-tokens",
+        type=int,
+        help="POT 反思生成 token 上限（默认 2500）",
+    )
+    set_parser.add_argument(
+        "--context-compress-enabled",
+        choices=["true", "false"],
+        help="是否启用上下文摘要压缩（默认 true）",
+    )
+    set_parser.add_argument(
+        "--context-compress-after",
+        type=int,
+        help="触发压缩的消息条数阈值（默认 18）",
+    )
+    set_parser.add_argument(
+        "--context-compress-chars",
+        type=int,
+        help="触发压缩的字符量阈值（默认 20000）",
+    )
+    set_parser.add_argument(
         "--evolution-enabled",
         choices=["true", "false"],
         help="是否启用空闲进化系统（默认 true）",
@@ -706,6 +927,34 @@ def main() -> None:
             f"enabled={config.agent.embedding_enabled}, "
             f"url={config.agent.embedding_base_url or '（未配置，走词法）'}, "
             f"model={config.agent.embedding_model}"
+        )
+        print(
+            "pot       = "
+            f"enabled={config.agent.pot_enabled}, "
+            f"cot={config.agent.pot_inject_cot}, "
+            f"rot={config.agent.pot_inject_rot}(hits={config.agent.pot_rot_hits}), "
+            f"path={config.agent.pot_path or '~/.geass/.pot'}"
+        )
+        print(
+            "cli       = "
+            f"rounds={config.agent.cli_rounds}, "
+            f"subagents={config.agent.cli_subagents}"
+        )
+        print(
+            "background= "
+            f"enabled={config.agent.background_enabled}, "
+            f"max={config.agent.background_max_tasks}"
+        )
+        print(
+            "evolution = "
+            f"max_tokens={config.agent.evolution_max_tokens}, "
+            f"pot_max_tokens={config.agent.pot_reflect_max_tokens}"
+        )
+        print(
+            "compress  = "
+            f"enabled={config.agent.context_compress_enabled}, "
+            f"after={config.agent.context_compress_after}条, "
+            f"chars={config.agent.context_compress_chars}"
         )
         print(f"api_key   = {mask_secret(config.api_key) or '（未设置）'}")
         print(f"ocr_token = {mask_secret(config.agent.ocr_token) or '（未设置）'}")
@@ -779,6 +1028,52 @@ def main() -> None:
         updates["agent"]["embedding_base_url"] = args.embedding_base_url
     if args.embedding_model:
         updates["agent"]["embedding_model"] = args.embedding_model
+    if args.pot_enabled is not None:
+        updates["agent"]["pot_enabled"] = args.pot_enabled == "true"
+    if args.pot_inject_cot is not None:
+        updates["agent"]["pot_inject_cot"] = args.pot_inject_cot == "true"
+    if args.pot_inject_rot is not None:
+        updates["agent"]["pot_inject_rot"] = args.pot_inject_rot == "true"
+    if args.pot_rot_hits is not None:
+        updates["agent"]["pot_rot_hits"] = max(
+            0, min(5, int(args.pot_rot_hits))
+        )
+    if args.pot_path:
+        updates["agent"]["pot_path"] = args.pot_path
+    if args.cli_rounds is not None:
+        updates["agent"]["cli_rounds"] = max(1, min(10, int(args.cli_rounds)))
+    if args.cli_subagents is not None:
+        updates["agent"]["cli_subagents"] = max(
+            1, min(6, int(args.cli_subagents))
+        )
+    if args.background_enabled is not None:
+        updates["agent"]["background_enabled"] = (
+            args.background_enabled == "true"
+        )
+    if args.background_max_tasks is not None:
+        updates["agent"]["background_max_tasks"] = max(
+            1, min(50, int(args.background_max_tasks))
+        )
+    if args.evolution_max_tokens is not None:
+        updates["agent"]["evolution_max_tokens"] = max(
+            200, int(args.evolution_max_tokens)
+        )
+    if args.pot_reflect_max_tokens is not None:
+        updates["agent"]["pot_reflect_max_tokens"] = max(
+            200, int(args.pot_reflect_max_tokens)
+        )
+    if args.context_compress_enabled is not None:
+        updates["agent"]["context_compress_enabled"] = (
+            args.context_compress_enabled == "true"
+        )
+    if args.context_compress_after is not None:
+        updates["agent"]["context_compress_after"] = max(
+            4, min(100, int(args.context_compress_after))
+        )
+    if args.context_compress_chars is not None:
+        updates["agent"]["context_compress_chars"] = max(
+            4000, int(args.context_compress_chars)
+        )
     if args.evolution_enabled is not None:
         updates["agent"]["evolution_enabled"] = args.evolution_enabled == "true"
     if args.evolution_idle_seconds is not None:
