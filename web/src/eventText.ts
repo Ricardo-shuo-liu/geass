@@ -28,6 +28,9 @@ export function renderLine(event: ControlEvent): string {
   if (event.type === 'evolution_status') {
     return `[进化] ${event.name ? `生成技能 ${event.name}` : event.message}`;
   }
+  if (event.type === 'schedule_status') {
+    return `[定时] ${event.message}`;
+  }
   if (event.type === 'error') {
     return `[错误] ${event.message ?? ''}`;
   }
@@ -51,6 +54,9 @@ export function danmakuText(event: ControlEvent): string {
   if (event.type === 'evolution_status') {
     return event.name ? `进化 · ${event.name}` : `进化 · ${event.message}`;
   }
+  if (event.type === 'schedule_status') {
+    return `定时 · ${event.message}`;
+  }
   if (event.type === 'agent_result') {
     return `完成 · ${event.message}`;
   }
@@ -72,6 +78,7 @@ export function eventStateClass(event: ControlEvent): string {
     return event.approved ? 'approval-ok' : 'approval-pending';
   }
   if (event.type === 'evolution_status') return 'evolution';
+  if (event.type === 'schedule_status') return 'schedule';
   if (event.type === 'error') return 'error';
   if (event.type === 'agent_result') return event.state;
   return event.state;

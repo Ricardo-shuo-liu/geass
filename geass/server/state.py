@@ -15,6 +15,9 @@ from ..io.backend import InputBackend, PyAutoGUIInputBackend
 from ..io.terminal import TerminalManager
 from ..memory import Memory
 from ..ocr import PaddleOCRBackend
+from ..rag import RAGManager
+from ..rag.embeddings import provider_from_config
+from ..scheduler import ScheduleStore, Scheduler
 from ..screen import ScreenCapture, ScreenStreamer
 from ..skills import (
     load_skills,
@@ -40,6 +43,9 @@ class AppState:
     ocr: Any = None
     memory: Memory | None = None
     evolution: EvolutionEngine | None = None
+    schedule_store: ScheduleStore | None = None
+    scheduler: Scheduler | None = None
+    rag: RAGManager | None = None
     last_activity: float = field(default_factory=time.time)
     approval_manager: ApprovalManager = field(default_factory=ApprovalManager)
     control_clients: set = field(default_factory=set)
@@ -96,6 +102,15 @@ def build_state(config: Config) -> AppState:
         if config.agent.memory_enabled
         else None
     )
+    schedule_store = ScheduleStore(config.agent.schedule_path or None)
+    rag = (
+        RAGManager(
+            config.agent.rag_path or None,
+            provider=provider_from_config(config),
+        )
+        if config.agent.rag_enabled
+        else None
+    )
 
     state = AppState(
         config=config,
@@ -110,6 +125,8 @@ def build_state(config: Config) -> AppState:
         skill_root=skill_root,
         ocr=ocr,
         memory=memory,
+        schedule_store=schedule_store,
+        rag=rag,
         approval_manager=approval_manager,
     )
     approval_manager.broadcast = lambda message: broadcast_control(state, message)
@@ -126,6 +143,8 @@ def build_state(config: Config) -> AppState:
         security=config.security,
         approval_gateway=approval_manager.request,
         memory=memory,
+        schedule_store=schedule_store,
+        rag=rag,
     )
     state.evolution = (
         EvolutionEngine(
@@ -139,6 +158,11 @@ def build_state(config: Config) -> AppState:
         )
         if client is not None
         else None
+    )
+    state.scheduler = Scheduler(
+        schedule_store,
+        _run_scheduled_job(state),
+        status_cb=lambda message: broadcast_control(state, message),
     )
     return state
 
@@ -178,6 +202,25 @@ def reload_state(state: AppState, config: Config) -> None:
         else None
     )
     state.agent.memory = state.memory
+    state.schedule_store = ScheduleStore(config.agent.schedule_path or None)
+    state.agent.schedule_store = state.schedule_store
+    state.rag = (
+        RAGManager(
+            config.agent.rag_path or None,
+            provider=provider_from_config(config),
+        )
+        if config.agent.rag_enabled
+        else None
+    )
+    state.agent.rag = state.rag
+    if state.scheduler is not None:
+        state.scheduler.store = state.schedule_store
+    else:
+        state.scheduler = Scheduler(
+            state.schedule_store,
+            _run_scheduled_job(state),
+            status_cb=lambda message: broadcast_control(state, message),
+        )
     state.skill_source_dir = _resolve_source_dir(config)
     state.skill_root = resolve_skill_root(
         config.agent.skill_root, config.config_path
@@ -216,3 +259,19 @@ def reload_state(state: AppState, config: Config) -> None:
 
 def _resolve_source_dir(config: Config):
     return resolve_skills_dir(config.agent.skills_dir, config.config_path)
+
+
+def _run_scheduled_job(state: AppState):
+    async def run_job(command: str) -> dict:
+        from .ws import start_agent
+
+        task = await start_agent(state, command)
+        if task is None:
+            return {
+                "ok": False,
+                "busy": True,
+                "error": "已有任务在运行，稍后重试",
+            }
+        return await task
+
+    return run_job

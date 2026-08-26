@@ -26,6 +26,16 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `agent.terminal_timeout` | `15` | Seconds `open_terminal` waits for a command's output |
 | `agent.skills_dir` | `skills` | Seed SKILL directory (relative to the project root), synced into `~/.geass/.skill/.system/` |
 | `agent.skill_root` | empty | Runtime SKILL root; defaults to `~/.geass/.skill` |
+| `agent.schedule_path` | empty | Scheduled-task directory; defaults to `~/.geass/.schedule` |
+| `agent.rag_enabled` | `true` | RAG master switch |
+| `agent.rag_inject_enabled` | `true` | Auto-inject RAG snippets at task start |
+| `agent.rag_inject_min_score` | `0.25` | Minimum injection score (0-1) |
+| `agent.rag_inject_hits` | `5` | Number of injected snippets |
+| `agent.rag_inject_chars` | `3000` | Max injected characters |
+| `agent.rag_path` | empty | RAG storage root; defaults to `~/.geass/.rag` |
+| `agent.embedding_enabled` | `true` | Enable embedding vector retrieval |
+| `agent.embedding_base_url` | empty | OpenAI-compatible embeddings endpoint; empty = lexical |
+| `agent.embedding_model` | `text-embedding-3-small` | Embedding model name |
 | `agent.memory_enabled` | `true` | Enable persistent memory (`remember`/`recall`/`forget`) |
 | `agent.memory_path` | empty | Memory directory; defaults to `~/.geass/.memory` (entries live in `entries.json`) |
 | `agent.memory_max_entries` | `200` | Maximum number of stored entries |

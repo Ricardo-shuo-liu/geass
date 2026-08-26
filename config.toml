@@ -48,6 +48,8 @@ skills_dir = "skills"
 # 运行时 SKILL 根目录：留空使用 ~/.geass/.skill
 # 系统技能在 .system/，自动进化生成的技能放在根目录下
 skill_root = ""
+# 定时任务目录；留空使用 ~/.geass/.schedule（jobs.json）
+schedule_path = ""
 # 持久记忆：Agent 跨任务保存用户偏好/环境事实（remember/recall/forget 工具）
 memory_enabled = true
 # 记忆目录路径；留空使用 ~/.geass/.memory（条目保存在 entries.json）
@@ -60,6 +62,18 @@ evolution_enabled = true
 evolution_idle_seconds = 300
 evolution_interval = 1800
 evolution_max_skills = 20
+# RAG：数据源检索增强（python -m geass.rag 管理）
+rag_enabled = true
+rag_inject_enabled = true
+rag_inject_min_score = 0.25
+rag_inject_hits = 5
+rag_inject_chars = 3000
+# RAG 存储根目录；留空使用 ~/.geass/.rag
+rag_path = ""
+# 嵌入向量：配置 OpenAI 兼容 embeddings 端点后自动升级向量检索；留空走本地词法
+embedding_enabled = true
+embedding_base_url = ""
+embedding_model = "text-embedding-3-small"
 
 [voice]
 # DeepSeek 等无语音转写接口的端点可留空以禁用兜底转写（端侧识别仍可用）

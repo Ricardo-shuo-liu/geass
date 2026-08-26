@@ -24,9 +24,20 @@ def create_app(state: AppState) -> FastAPI:
             if state.evolution is not None
             else None
         )
+        scheduler_task = (
+            asyncio.create_task(state.scheduler.run())
+            if state.scheduler is not None
+            else None
+        )
         try:
             yield
         finally:
+            if scheduler_task is not None:
+                scheduler_task.cancel()
+                try:
+                    await scheduler_task
+                except asyncio.CancelledError:
+                    pass
             if evolution_task is not None:
                 evolution_task.cancel()
                 try:

@@ -10,6 +10,7 @@ from geass.agent import TEXT_ONLY_TOOLS, Agent, AgentError
 from geass.config import AgentConfig
 from geass.memory import Memory
 from geass.ocr import OCRBox, OCRResult
+from geass.scheduler import ScheduleStore
 
 from .conftest import (
     FakeBackend,
@@ -687,3 +688,68 @@ def test_hard_browser_task_plans_launches_and_verifies(monkeypatch):
         result_ for result_ in tool_results if "active_window" in result_
     )
     assert verified["active_window"]["name"] == "Firefox — 新标签页"
+
+
+def test_schedule_tool_directly_creates_temp_job(tmp_path):
+    store = ScheduleStore(tmp_path / ".schedule")
+    agent, _, _ = build([])
+    agent.schedule_store = store
+
+    result = asyncio.run(
+        agent._execute(
+            "schedule",
+            {"command": "打开终端", "run_at": "2099-01-01T12:00:00"},
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["job"]["persistent"] is False
+    assert store.list()[0].command == "打开终端"
+
+
+def test_schedule_tool_persist_requires_confirmation_then_confirm(tmp_path):
+    store = ScheduleStore(tmp_path / ".schedule")
+    agent, _, _ = build([])
+    agent.schedule_store = store
+
+    first = asyncio.run(
+        agent._execute(
+            "schedule",
+            {
+                "command": "打开终端",
+                "run_at": "2099-01-01T12:00:00",
+                "persist": True,
+            },
+        )
+    )
+    assert first["ok"] is True
+    assert first["status"] == "awaiting_confirmation"
+    assert store.list() == []
+
+    wrong = asyncio.run(
+        agent._execute(
+            "schedule",
+            {
+                "command": "其他命令",
+                "run_at": "2099-01-01T12:00:00",
+                "persist": True,
+                "confirm": True,
+            },
+        )
+    )
+    assert wrong["ok"] is False
+
+    confirmed = asyncio.run(
+        agent._execute(
+            "schedule",
+            {
+                "command": "打开终端",
+                "run_at": "2099-01-01T12:00:00",
+                "persist": True,
+                "confirm": True,
+            },
+        )
+    )
+    assert confirmed["ok"] is True
+    assert confirmed["job"]["persistent"] is True
+    assert store.list()[0].status == "pending"

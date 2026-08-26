@@ -69,10 +69,20 @@ class AgentConfig:
     memory_max_entries: int = 200
     memory_context_entries: int = 8
     skill_root: str = ""
+    schedule_path: str = ""
     evolution_enabled: bool = True
     evolution_idle_seconds: float = 300.0
     evolution_interval: float = 1800.0
     evolution_max_skills: int = 20
+    rag_path: str = ""
+    rag_enabled: bool = True
+    rag_inject_enabled: bool = True
+    rag_inject_min_score: float = 0.25
+    rag_inject_hits: int = 5
+    rag_inject_chars: int = 3000
+    embedding_enabled: bool = True
+    embedding_base_url: str = ""
+    embedding_model: str = "text-embedding-3-small"
 
 
 @dataclass
@@ -299,6 +309,9 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     skill_root = str(
         pick(u_agent, "skill_root", pick(p_agent, "skill_root", "")) or ""
     )
+    schedule_path = str(
+        pick(u_agent, "schedule_path", pick(p_agent, "schedule_path", "")) or ""
+    )
     evolution_enabled = bool(
         pick(
             u_agent,
@@ -338,6 +351,78 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
                 )
             ),
         ),
+    )
+    rag_path = str(
+        pick(u_agent, "rag_path", pick(p_agent, "rag_path", "")) or ""
+    )
+    rag_enabled = bool(
+        pick(u_agent, "rag_enabled", pick(p_agent, "rag_enabled", True))
+    )
+    rag_inject_enabled = bool(
+        pick(
+            u_agent,
+            "rag_inject_enabled",
+            pick(p_agent, "rag_inject_enabled", True),
+        )
+    )
+    rag_inject_min_score = max(
+        0.0,
+        min(
+            1.0,
+            float(
+                pick(
+                    u_agent,
+                    "rag_inject_min_score",
+                    pick(p_agent, "rag_inject_min_score", 0.25),
+                )
+            ),
+        ),
+    )
+    rag_inject_hits = max(
+        1,
+        min(
+            20,
+            int(
+                pick(
+                    u_agent,
+                    "rag_inject_hits",
+                    pick(p_agent, "rag_inject_hits", 5),
+                )
+            ),
+        ),
+    )
+    rag_inject_chars = max(
+        200,
+        int(
+            pick(
+                u_agent,
+                "rag_inject_chars",
+                pick(p_agent, "rag_inject_chars", 3000),
+            )
+        ),
+    )
+    embedding_enabled = bool(
+        pick(
+            u_agent,
+            "embedding_enabled",
+            pick(p_agent, "embedding_enabled", True),
+        )
+    )
+    embedding_base_url = str(
+        pick(
+            u_agent,
+            "embedding_base_url",
+            pick(p_agent, "embedding_base_url", ""),
+        )
+        or ""
+    )
+    embedding_model = str(
+        pick(
+            u_agent,
+            "embedding_model",
+            pick(p_agent, "embedding_model", "text-embedding-3-small"),
+        )
+        or "text-embedding-3-small"
     )
     security_enabled = bool(
         pick(u_security, "enabled", pick(p_security, "enabled", True))
@@ -392,10 +477,20 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             memory_max_entries=memory_max_entries,
             memory_context_entries=memory_context_entries,
             skill_root=skill_root,
+            schedule_path=schedule_path,
             evolution_enabled=evolution_enabled,
             evolution_idle_seconds=evolution_idle_seconds,
             evolution_interval=evolution_interval,
             evolution_max_skills=evolution_max_skills,
+            rag_path=rag_path,
+            rag_enabled=rag_enabled,
+            rag_inject_enabled=rag_inject_enabled,
+            rag_inject_min_score=rag_inject_min_score,
+            rag_inject_hits=rag_inject_hits,
+            rag_inject_chars=rag_inject_chars,
+            embedding_enabled=embedding_enabled,
+            embedding_base_url=embedding_base_url,
+            embedding_model=embedding_model,
         ),
         security=SecurityConfig(
             enabled=security_enabled,
@@ -508,6 +603,45 @@ def main() -> None:
         "--skill-root", help="运行时 SKILL 根目录（默认 ~/.geass/.skill）"
     )
     set_parser.add_argument(
+        "--schedule-path", help="定时任务目录（默认 ~/.geass/.schedule）"
+    )
+    set_parser.add_argument(
+        "--rag-path", help="RAG 存储根目录（默认 ~/.geass/.rag）"
+    )
+    set_parser.add_argument(
+        "--rag-enabled",
+        choices=["true", "false"],
+        help="RAG 总开关（默认 true）",
+    )
+    set_parser.add_argument(
+        "--rag-inject-enabled",
+        choices=["true", "false"],
+        help="任务开始自动注入 RAG 片段（默认 true）",
+    )
+    set_parser.add_argument(
+        "--rag-inject-min-score",
+        type=float,
+        help="注入最低相似度（0~1，默认 0.25）",
+    )
+    set_parser.add_argument(
+        "--rag-inject-hits",
+        type=int,
+        help="注入片段数量（默认 5）",
+    )
+    set_parser.add_argument(
+        "--embedding-enabled",
+        choices=["true", "false"],
+        help="是否启用嵌入向量检索（默认 true）",
+    )
+    set_parser.add_argument(
+        "--embedding-base-url",
+        help="OpenAI 兼容 embeddings 端点；留空则使用本地词法检索",
+    )
+    set_parser.add_argument(
+        "--embedding-model",
+        help="嵌入模型名（默认 text-embedding-3-small）",
+    )
+    set_parser.add_argument(
         "--evolution-enabled",
         choices=["true", "false"],
         help="是否启用空闲进化系统（默认 true）",
@@ -560,6 +694,19 @@ def main() -> None:
             f"max={config.agent.evolution_max_skills}, "
             f"root={config.agent.skill_root or resolve_skill_root(None)}"
         )
+        print(f"schedule  = {config.agent.schedule_path or '~/.geass/.schedule'}")
+        print(
+            "rag       = "
+            f"enabled={config.agent.rag_enabled}, "
+            f"inject={config.agent.rag_inject_enabled}, "
+            f"path={config.agent.rag_path or '~/.geass/.rag'}"
+        )
+        print(
+            "embedding = "
+            f"enabled={config.agent.embedding_enabled}, "
+            f"url={config.agent.embedding_base_url or '（未配置，走词法）'}, "
+            f"model={config.agent.embedding_model}"
+        )
         print(f"api_key   = {mask_secret(config.api_key) or '（未设置）'}")
         print(f"ocr_token = {mask_secret(config.agent.ocr_token) or '（未设置）'}")
         print(
@@ -606,6 +753,32 @@ def main() -> None:
         updates["agent"]["memory_path"] = args.memory_path
     if args.skill_root:
         updates["agent"]["skill_root"] = args.skill_root
+    if args.schedule_path:
+        updates["agent"]["schedule_path"] = args.schedule_path
+    if args.rag_path:
+        updates["agent"]["rag_path"] = args.rag_path
+    if args.rag_enabled is not None:
+        updates["agent"]["rag_enabled"] = args.rag_enabled == "true"
+    if args.rag_inject_enabled is not None:
+        updates["agent"]["rag_inject_enabled"] = (
+            args.rag_inject_enabled == "true"
+        )
+    if args.rag_inject_min_score is not None:
+        updates["agent"]["rag_inject_min_score"] = max(
+            0.0, min(1.0, float(args.rag_inject_min_score))
+        )
+    if args.rag_inject_hits is not None:
+        updates["agent"]["rag_inject_hits"] = max(
+            1, min(20, int(args.rag_inject_hits))
+        )
+    if args.embedding_enabled is not None:
+        updates["agent"]["embedding_enabled"] = (
+            args.embedding_enabled == "true"
+        )
+    if args.embedding_base_url:
+        updates["agent"]["embedding_base_url"] = args.embedding_base_url
+    if args.embedding_model:
+        updates["agent"]["embedding_model"] = args.embedding_model
     if args.evolution_enabled is not None:
         updates["agent"]["evolution_enabled"] = args.evolution_enabled == "true"
     if args.evolution_idle_seconds is not None:

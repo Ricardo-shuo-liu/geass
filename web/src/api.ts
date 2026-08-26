@@ -33,4 +33,3 @@ export async function transcribe(token: string, blob: Blob): Promise<string> {
   const json = (await res.json()) as { text: string };
   return json.text;
 }
-

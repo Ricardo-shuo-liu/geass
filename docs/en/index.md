@@ -10,6 +10,8 @@
 - [Task planning & memory](tasks-and-memory.md): difficulty self-assessment, planning/verification loop, persistent memory
 - [Skill evolution & runtime directory](skills-evolution.md): runtime SKILL layout and idle evolution
 - [Manual direct control](manual-control.md): touch, virtual touchpad, virtual keyboard and gestures
+- [Scheduled tasks](schedule.md): run a command at a specified time, with persistence and status events
+- [RAG source retrieval](rag.md): register local files/folders, vector/lexical search, source management
 - [Configuration](configuration.md): precedence, environment variables, CLI and runtime API
 - [Project layout & development](development.md): modules, development, known limitations
 

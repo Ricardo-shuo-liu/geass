@@ -361,6 +361,7 @@ button:disabled {
 .danmaku-item[data-state='acted'],
 .danmaku-item[data-state='done'],
 .danmaku-item[data-state='evolution'],
+.danmaku-item[data-state='schedule'],
 .danmaku-item[data-state='approval-ok'] {
   border-left-color: var(--lime);
 }
@@ -1026,6 +1027,11 @@ button:disabled {
 }
 
 .log-evolution {
+  color: var(--yellow);
+  border-left-color: var(--yellow) !important;
+}
+
+.log-schedule {
   color: var(--yellow);
   border-left-color: var(--yellow) !important;
 }

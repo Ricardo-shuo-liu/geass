@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import platform
+import time
 from typing import Any, Awaitable, Callable
 
 from openai import AsyncOpenAI
@@ -59,7 +60,13 @@ SYSTEM_PROMPT = (
     "13. 计划中每一步执行后都要验证再进入下一步：优先用 find_text / "
     "find_element / window_info / screenshot 确认预期状态；工具结果若提示"
     "屏幕未变化，说明操作可能没生效，应调整坐标或换一种方法重试，"
-    "不要机械重复同一操作。"
+    "不要机械重复同一操作。\n"
+    "14. 当用户要求“在某个时间做某事”时，先调用 schedule 工具登记："
+    "run_at 使用本地 ISO 时间（如 2026-08-26T17:00:00）。一次性近期任务 "
+    "persist=false 直接创建；只有用户明确要求长期/跨重启/重复执行时才需要"
+    "持久化，并且必须先询问用户是否长期保存，用户同意后再询问一次确认"
+    "命令与时间，最后带 confirm=true 完成创建；未经用户确认不要带 "
+    "confirm=true。"
 )
 
 
@@ -379,6 +386,28 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "schedule",
+        "description": (
+            "把用户要求定时执行的动作登记为定时任务。run_at 使用本地 ISO "
+            "时间（如 2026-08-26T17:00:00）或 epoch 秒。persist=true 表示"
+            "服务重启后仍执行，必须先征得用户同意：第一次调用不带 confirm "
+            "登记待确认内容，用户明确同意且再次确认时间与命令后，再带 "
+            "confirm=true 完成创建；临时任务 persist=false 直接创建。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string"},
+                "run_at": {"type": "string"},
+                "persist": {"type": "boolean"},
+                "confirm": {"type": "boolean"},
+            },
+            "required": ["command", "run_at"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "remember",
         "description": (
             "把跨任务有用的信息写入持久记忆（按 key 覆盖）。适合保存用户"
@@ -423,6 +452,66 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "type": "function",
+        "name": "rag_add",
+        "description": (
+            "把本机文件或文件夹锁定为 RAG 数据源（文件夹递归读取）。"
+            "extensions 为允许的后缀（逗号分隔，如 '.md,.txt'），缺省使用"
+            "内置白名单。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "name": {"type": "string"},
+                "extensions": {"type": "string"},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "rag_search",
+        "description": (
+            "在 RAG 数据源中检索与 query 最相关的片段，返回来源文件、"
+            "分块序号、相似度与正文；source 留空则检索全部数据源。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "source": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
+        "name": "rag_list",
+        "description": "列出全部 RAG 数据源（名称、模式、文件数、分块数、是否启用）。",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "type": "function",
+        "name": "rag_remove",
+        "description": (
+            "删除 RAG 数据源或其单个文件的镜像；rel_path 缺省时删除整个"
+            "数据源，只影响 RAG 镜像，不删除原始文件。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "rel_path": {"type": "string"},
+            },
+            "required": ["source"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "type": "function",
         "name": "finish",
         "description": "任务完成或无法继续时调用，summary 简要说明结果。",
         "parameters": {
@@ -444,11 +533,16 @@ TEXT_ONLY_TOOLS = {
     "list_skills",
     "read_skill",
     "plan",
+    "schedule",
     "browser",
     "window_info",
     "remember",
     "recall",
     "forget",
+    "rag_add",
+    "rag_search",
+    "rag_list",
+    "rag_remove",
     "wait",
     "finish",
 }
@@ -493,6 +587,8 @@ class Agent:
         security: SecurityConfig | None = None,
         approval_gateway: Any = None,
         memory: Memory | None = None,
+        schedule_store: Any = None,
+        rag: Any = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -510,6 +606,9 @@ class Agent:
         self.approval_gateway = approval_gateway
         self.memory = memory
         self.plan: TaskPlan | None = None
+        self.schedule_store = schedule_store
+        self.pending_schedule: dict[str, Any] | None = None
+        self.rag = rag
 
     def resolve_vision(self) -> bool:
         """按 vision_whitelist 决定是否给模型发截图。
@@ -654,6 +753,8 @@ class Agent:
                 )
             if name == "plan":
                 return self._plan_result(args)
+            if name == "schedule":
+                return self._handle_schedule(args)
             if name == "browser":
                 action = str(args.get("action") or "open")
                 url = str(args.get("url") or "")
@@ -695,6 +796,14 @@ class Agent:
                 return await run_in_thread(self._recall, args)
             if name == "forget":
                 return await run_in_thread(self._forget, args)
+            if name == "rag_add":
+                return await run_in_thread(self._rag_add, args)
+            if name == "rag_search":
+                return await run_in_thread(self._rag_search, args)
+            if name == "rag_list":
+                return await run_in_thread(self._rag_list, args)
+            if name == "rag_remove":
+                return await run_in_thread(self._rag_remove, args)
             if name == "find_text":
                 text = str(args.get("text") or "").strip()
                 if not text:
@@ -858,6 +967,84 @@ class Agent:
             "plan": plan.to_dict(),
         }
 
+    @staticmethod
+    def _parse_run_at(value: Any) -> float:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError("缺少执行时间")
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+        from datetime import datetime
+
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"执行时间格式无效：{raw}") from exc
+        if parsed.tzinfo is None:
+            parsed = parsed.astimezone()
+        return parsed.timestamp()
+
+    def _handle_schedule(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.schedule_store is None:
+            return {"ok": False, "error": "定时系统未启用"}
+        command = str(args.get("command") or "").strip()
+        if not command:
+            return {"ok": False, "error": "定时命令不能为空"}
+        persist = bool(args.get("persist"))
+        confirm = bool(args.get("confirm"))
+        try:
+            run_at = self._parse_run_at(args.get("run_at"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        if run_at <= time.time():
+            return {"ok": False, "error": "执行时间必须晚于当前时间"}
+
+        if persist and not confirm:
+            self.pending_schedule = {
+                "command": command,
+                "run_at": run_at,
+            }
+            return {
+                "ok": True,
+                "status": "awaiting_confirmation",
+                "message": (
+                    "已登记待确认的长期定时任务。请先询问用户是否长期保存，"
+                    "并在用户同意且确认时间与命令后，再次调用 schedule "
+                    "（confirm=true）完成创建"
+                ),
+            }
+
+        if persist:
+            pending = self.pending_schedule
+            if (
+                pending is None
+                or pending.get("command") != command
+                or abs(float(pending.get("run_at") or 0) - run_at) > 60
+            ):
+                return {
+                    "ok": False,
+                    "error": (
+                        "没有匹配的待确认定时任务。请先不带 confirm 调用一次，"
+                        "征得用户同意后再确认创建"
+                    ),
+                }
+            self.pending_schedule = None
+
+        try:
+            job = self.schedule_store.add(
+                command, run_at, persistent=persist
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        label = "长期" if persist else "临时"
+        return {
+            "ok": True,
+            "job": job.to_dict(),
+            "message": f"已创建{label}定时任务：{command}",
+        }
+
     def _remember(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.memory is None:
             return {"ok": False, "error": "记忆系统未启用"}
@@ -900,6 +1087,92 @@ class Agent:
         key = str(args.get("key") or "").strip()
         removed = self.memory.forget(key)
         message = f"已删除记忆「{key}」" if removed else f"没有找到记忆「{key}」"
+        return {"ok": True, "removed": removed, "message": message}
+
+    def _rag_add(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.rag is None:
+            return {"ok": False, "error": "RAG 未启用"}
+        exts = None
+        if args.get("extensions"):
+            exts = [
+                item.strip()
+                for item in str(args["extensions"]).split(",")
+                if item.strip()
+            ]
+        try:
+            return self.rag.add_source(
+                str(args.get("path") or ""),
+                name=args.get("name"),
+                exts=exts,
+            )
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "error": f"RAG 导入失败：{exc}"}
+
+    def _rag_search(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.rag is None:
+            return {"ok": False, "error": "RAG 未启用"}
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return {"ok": False, "error": "rag_search 需要非空 query"}
+        try:
+            hits = self.rag.search(
+                query,
+                source=args.get("source"),
+                limit=max(1, min(20, int(args.get("limit") or 5))),
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"RAG 检索失败：{exc}"}
+        if not hits:
+            return {
+                "ok": True,
+                "found": False,
+                "matches": [],
+                "message": "RAG 未找到相关内容",
+            }
+        matches = [
+            {
+                "source": hit.get("source_name"),
+                "path": hit.get("path"),
+                "chunk_index": hit.get("index"),
+                "score": hit.get("score"),
+                "text": hit.get("text"),
+            }
+            for hit in hits
+        ]
+        return {
+            "ok": True,
+            "found": True,
+            "count": len(matches),
+            "matches": matches,
+            "message": f"找到 {len(matches)} 条相关片段",
+        }
+
+    def _rag_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.rag is None:
+            return {"ok": False, "error": "RAG 未启用"}
+        sources = self.rag.list_sources()
+        return {
+            "ok": True,
+            "count": len(sources),
+            "sources": sources,
+            "message": f"共 {len(sources)} 个 RAG 数据源",
+        }
+
+    def _rag_remove(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self.rag is None:
+            return {"ok": False, "error": "RAG 未启用"}
+        source = str(args.get("source") or "").strip()
+        rel_path = str(args.get("rel_path") or "").strip()
+        if rel_path:
+            removed = self.rag.remove_file(source, rel_path)
+            message = (
+                f"已删除 {source}/{rel_path} 的 RAG 镜像"
+                if removed
+                else f"找不到 {source}/{rel_path}"
+            )
+        else:
+            removed = self.rag.remove_source(source)
+            message = f"已删除 RAG 数据源：{source}" if removed else f"数据源不存在：{source}"
         return {"ok": True, "removed": removed, "message": message}
 
     def _terminal_session(
@@ -1171,7 +1444,7 @@ class Agent:
             )
         return text
 
-    def _system_prompt(self, command: str = "") -> str:
+    def _system_prompt(self, command: str = "", rag_context: str = "") -> str:
         prompt = SYSTEM_PROMPT + "\n\n环境信息：" + ENVIRONMENT_HINT
         if self.skills:
             prompt += "\n\n技能规则：\n" + catalog_text(self.skills)
@@ -1181,6 +1454,11 @@ class Agent:
             )
             if context:
                 prompt += "\n\n持久记忆（与本任务相关的最近条目）：\n" + context
+        if rag_context:
+            prompt += (
+                "\n\nRAG 参考资料（来自用户数据源，供回答与执行参考，"
+                "以实际观察到的界面为准）：\n" + rag_context
+            )
         if not self.vision:
             if self.ocr is not None and self.ocr_ready:
                 prompt += (
@@ -1224,14 +1502,35 @@ class Agent:
         ]
 
     async def _initial_messages(self, command: str) -> list[dict[str, Any]]:
+        rag_context = await self._rag_context(command)
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self._system_prompt(command)},
+            {"role": "system", "content": self._system_prompt(command, rag_context)},
             {"role": "user", "content": command},
         ]
         screen_content = await self._screen_content("当前屏幕状态如下：")
         if screen_content is not None:
             messages.append(screen_content)
         return messages
+
+    async def _rag_context(self, command: str) -> str:
+        if (
+            self.rag is None
+            or not getattr(self.config, "rag_enabled", True)
+            or not getattr(self.config, "rag_inject_enabled", True)
+        ):
+            return ""
+        try:
+            return await run_in_thread(
+                lambda: self.rag.context_for(
+                    command,
+                    limit=self.config.rag_inject_hits,
+                    max_chars=self.config.rag_inject_chars,
+                    min_score=self.config.rag_inject_min_score,
+                )
+            )
+        except Exception:
+            logger.warning("RAG 注入失败，跳过", exc_info=True)
+            return ""
 
     async def _create_response(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]

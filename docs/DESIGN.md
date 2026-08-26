@@ -69,6 +69,12 @@ Geass 是一个"手机指挥电脑"的系统：
   自动编写通用 SKILL 写入运行时目录，下次任务生效；
 - 手动直控：PWA 触屏 + 网页渲染的虚拟鼠标触摸板/虚拟键盘，经
   `manual_input` 直接落到 InputBackend，不经过模型，可打断并接管 Agent；
+- 定时任务：对话中由模型识别时间意图并调用 `schedule` 工具，后台到点复用
+  Agent 流程执行；临时任务仅存内存、长期任务需用户确认后持久化，支持
+  取消、忙碌重试与状态推送；
+- RAG 检索增强：`geass/rag/` 独立包，锁定本地文件/文件夹数据源、递归读取
+  分块、向量（可插拔 OpenAI 兼容 embeddings，faiss 可选）或本地词法检索，
+  任务开始自动注入最相关片段并提供按需检索工具；
 - 自判难度的任务系统：模型在任务开始时自行判断 easy/hard，困难任务先调用
   `plan` 记录目标与步骤；执行循环持续注入计划并可更新 `current_step`，
   每个改变屏幕的动作回填 `screen_changed` 差异检测结果，手机端展示计划卡片；
@@ -91,6 +97,10 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/memory.py`：JSON 文件持久记忆（原子写入、关键字检索、容量上限）；
 - `geass/evolution.py`：空闲进化引擎（活动时间检测、任务历史、模型生成
   SKILL、事件日志与状态广播）；
+- `geass/scheduler.py`：定时任务存储（`~/.geass/.schedule/jobs.json`）与
+  后台触发循环（到期执行、忙碌 5 秒重试、状态事件）；
+- `geass/rag/`：RAG 包（store 存储与同名镜像、chunker 分块过滤、
+  embeddings 可插拔 Provider、lexical 词法检索、index 向量索引、CLI）；
 - `geass/safety.py`：高危 shell 命令黑名单策略（不区分大小写正则匹配，返回是否拦截与原因）；
 - `geass/check.py`：`python -m geass.check` 环境自检（密钥只显示是否配置）；
 - `geass/io/backend.py`：InputBackend 抽象与 PyAutoGUI 实现，坐标归一化后在此换算为像素；
@@ -123,6 +133,9 @@ Geass 是一个"手机指挥电脑"的系统：
 | `GET /api/info` | 服务信息（需 Token） |
 | `POST /api/transcribe` | 上传音频 → whisper-1 转文字（需 Token） |
 | `POST /api/agent/stop` | 停止当前 Agent 任务（需 Token） |
+| `GET /api/schedule` | 列出定时任务（需 Token） |
+| `POST /api/schedule` | 添加定时任务 `{command, run_at}`（需 Token） |
+| `DELETE /api/schedule/{id}` | 取消定时任务（需 Token） |
 | `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
 | `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval` / `manual_input`，状态与审核事件 |
 
@@ -236,7 +249,15 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）只是种子目录，�
 条目保存在 `entries.json`，写入采用临时文件 + 原子替换；系统提示只注入与
 本任务相关的最近条目。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒、记忆开启、进化开启且空闲 300 秒触发。
+RAG：`agent.rag_enabled`（默认 true）、`agent.rag_inject_enabled`（默认 true）、
+`agent.rag_inject_min_score`（默认 0.25）、`agent.rag_inject_hits`（默认 5）、
+`agent.rag_inject_chars`（默认 3000）、`agent.rag_path`（默认
+`~/.geass/.rag`）；嵌入：`agent.embedding_enabled`（默认 true）、
+`agent.embedding_base_url`（默认空=词法）、`agent.embedding_model`（默认
+`text-embedding-3-small`）。数据源按相对路径镜像，模型指纹不匹配时
+`needs_reindex` 并降级词法。
+
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒、记忆开启、进化开启且空闲 300 秒触发、定时任务目录 `~/.geass/.schedule`。
 
 ## 10. 路线图
 
@@ -273,7 +294,7 @@ SKILL：`agent.skills_dir`（默认项目下 `skills/`）只是种子目录，�
 
 ## 13. 测试与验收
 
-- 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、前后帧差异检测、SKILL 种子同步与运行时加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检、任务计划解析与渲染、记忆读写/检索/持久化/容量上限、进化引擎的空闲触发/生成/跳过/命名/上限/任务历史；
+- 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、前后帧差异检测、SKILL 种子同步与运行时加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检、任务计划解析与渲染、记忆读写/检索/持久化/容量上限、进化引擎的空闲触发/生成/跳过/命名/上限/任务历史、定时任务存储/到期执行/忙碌重试/REST 增删查、RAG 分块/过滤/对账/词法/余弦/嵌入探测/指纹降级/CLI；
 - 集成：mock OpenAI + fake InputBackend 跑完整循环（含视觉降级与 OCR 文本模式、plan/browser/window_info/memory 工具、屏幕差异反馈，以及审核拒绝后继续循环）；WS 认证、帧通道与审核请求/响应往返；进化引擎生成后下次扫描可见；
 - 真机 E2E：实时画面、文字/语音命令完成"打开应用 + 输入文本"、停止中断、错误 token 拒绝；
 - 验收：局域网 ≥15fps、停止响应 <1s、单任务步数/费用有上限。

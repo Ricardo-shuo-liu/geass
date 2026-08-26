@@ -175,13 +175,14 @@ async def start_agent(state: AppState, text: str) -> None:
 
     state.cancel_event = asyncio.Event()
 
-    async def run_and_report() -> None:
+    async def run_and_report() -> dict:
         try:
             result = await state.agent.run(text, cancel=state.cancel_event)
         except Exception as exc:
             result = {"state": "error", "message": str(exc)}
         await broadcast_control(state, {"type": "agent_result", **result})
         state.last_activity = time.time()
+        return result
 
     state.agent_task = asyncio.create_task(run_and_report())
     await broadcast_control(
@@ -194,3 +195,4 @@ async def start_agent(state: AppState, text: str) -> None:
             "message": f"已接收命令：{text}",
         },
     )
+    return state.agent_task

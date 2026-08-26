@@ -26,6 +26,16 @@
 | `agent.terminal_timeout` | `15` | `open_terminal` 等待命令输出的秒数 |
 | `agent.skills_dir` | `skills` | 种子 SKILL 目录（相对项目根目录），同步到 `~/.geass/.skill/.system/` |
 | `agent.skill_root` | 空 | 运行时 SKILL 根目录；留空用 `~/.geass/.skill` |
+| `agent.schedule_path` | 空 | 定时任务目录；留空用 `~/.geass/.schedule` |
+| `agent.rag_enabled` | `true` | RAG 总开关 |
+| `agent.rag_inject_enabled` | `true` | 任务开始自动注入 RAG 片段 |
+| `agent.rag_inject_min_score` | `0.25` | 注入最低相似度（0~1） |
+| `agent.rag_inject_hits` | `5` | 注入片段数量 |
+| `agent.rag_inject_chars` | `3000` | 注入最大字符数 |
+| `agent.rag_path` | 空 | RAG 存储根目录；留空用 `~/.geass/.rag` |
+| `agent.embedding_enabled` | `true` | 是否启用嵌入向量检索 |
+| `agent.embedding_base_url` | 空 | OpenAI 兼容 embeddings 端点；留空走本地词法 |
+| `agent.embedding_model` | `text-embedding-3-small` | 嵌入模型名 |
 | `agent.memory_enabled` | `true` | 是否启用持久记忆（`remember`/`recall`/`forget`） |
 | `agent.memory_path` | 空 | 记忆目录路径；留空用 `~/.geass/.memory`（条目在 `entries.json`） |
 | `agent.memory_max_entries` | `200` | 记忆最多保留的条目数 |

@@ -19,6 +19,8 @@ codenamed **Paisley-Park**.
 - Self-assessed task system: `plan`, multi-channel verification and automatic approach switching
 - Semantic grounding: `find_text` / `find_element` / `window_info`
 - Manual direct control: touch screen plus virtual mouse touchpad and keyboard rendered in the PWA, no model in the loop
+- Scheduled tasks: created conversationally from temporal prompts; long-term jobs persist after user confirmation
+- RAG retrieval: register local files/folders as sources with vector or local lexical search injected into tasks
 - Visible terminal: one-shot commands, streamed input, output monitoring
 - Persistent memory and idle evolution: recurring usage patterns become SKILLs automatically
 - SKILL system: repo `skills/` is a seed, runtime loading from `~/.geass/.skill/`

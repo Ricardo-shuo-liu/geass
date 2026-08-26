@@ -32,6 +32,12 @@ class ConfigUpdate(BaseModel):
     approval_timeout: float | None = None
 
 
+class ScheduleAdd(BaseModel):
+    command: str
+    run_at: float
+    persistent: bool = True
+
+
 def config_summary(state) -> dict[str, Any]:
     return {
         "model": state.config.agent.model,
@@ -169,6 +175,39 @@ def register(app) -> None:
         state = request.app.state.geass
         if state.cancel_event is not None:
             state.cancel_event.set()
+        return {"ok": True}
+
+    @router.get("/api/schedule", dependencies=[Depends(require_token)])
+    async def list_schedule(request: Request):
+        state = request.app.state.geass
+        if state.schedule_store is None:
+            raise HTTPException(status_code=503, detail="定时系统不可用")
+        return {
+            "jobs": [job.to_dict() for job in state.schedule_store.list()]
+        }
+
+    @router.post("/api/schedule", dependencies=[Depends(require_token)])
+    async def add_schedule(request: Request, payload: ScheduleAdd):
+        state = request.app.state.geass
+        if state.schedule_store is None:
+            raise HTTPException(status_code=503, detail="定时系统不可用")
+        try:
+            job = state.schedule_store.add(
+                payload.command,
+                payload.run_at,
+                persistent=payload.persistent,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"job": job.to_dict()}
+
+    @router.delete("/api/schedule/{job_id}", dependencies=[Depends(require_token)])
+    async def cancel_schedule(request: Request, job_id: str):
+        state = request.app.state.geass
+        if state.schedule_store is None:
+            raise HTTPException(status_code=503, detail="定时系统不可用")
+        if not state.schedule_store.remove(job_id):
+            raise HTTPException(status_code=404, detail="定时任务不存在或已处理")
         return {"ok": True}
 
     app.include_router(router)

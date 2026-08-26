@@ -63,6 +63,25 @@ export interface EvolutionStatus {
   _time?: string;
 }
 
+export interface ScheduleJob {
+  id: string;
+  command: string;
+  run_at: number;
+  created_at: number;
+  persistent?: boolean;
+  status: 'pending' | 'running' | 'done' | 'error';
+  retry_at?: number;
+  message?: string;
+  updated_at?: number;
+}
+
+export interface ScheduleStatus {
+  type: 'schedule_status';
+  job?: ScheduleJob;
+  message: string;
+  _time?: string;
+}
+
 export interface ServerError {
   type: 'error';
   message?: string;
@@ -75,6 +94,7 @@ export type ControlEvent =
   | ApprovalRequest
   | ApprovalResolved
   | EvolutionStatus
+  | ScheduleStatus
   | ServerError;
 
 export type DanmakuDensity = 'all' | 'key' | 'minimal';
