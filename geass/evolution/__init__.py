@@ -1,4 +1,5 @@
 """进化系统包：空闲进化引擎 + POT 反思系统。"""
+
 from __future__ import annotations
 
 from .engine import (
@@ -12,7 +13,7 @@ from .engine import (
     EvolutionEngine,
     StatusCallback,
 )
-from .pot import POTStore, ROT, default_pot_path
+from .pot import ROT, POTStore, default_pot_path
 
 __all__ = [
     "ActivityCallback",

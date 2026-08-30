@@ -1,4 +1,5 @@
 """``geass pot``：POT 反思系统管理命令。"""
+
 from __future__ import annotations
 
 import argparse
@@ -20,8 +21,8 @@ def main() -> None:
     set_parser = cot_sub.add_parser("set", help="设置 COT（读取 stdin 或 --text）")
     set_parser.add_argument("--text", help="COT 文本")
 
-    rot = sub.add_parser("rot", help="管理 ROT")
-    rot_sub = rot.add_subparsers(dest="action", required=True)
+    rot_parser = sub.add_parser("rot", help="管理 ROT")
+    rot_sub = rot_parser.add_subparsers(dest="action", required=True)
     rot_sub.add_parser("list", help="列出全部 ROT")
     show = rot_sub.add_parser("show", help="显示指定 ROT")
     show.add_argument("name")
@@ -53,10 +54,10 @@ def main() -> None:
             print(f"{rot.name}  [{status}] {rot.description}")
         return
     if args.action == "show":
-        rot = store.get_rot(args.name)
-        if rot is None:
+        rot_item = store.get_rot(args.name)
+        if rot_item is None:
             raise SystemExit(f"ROT 不存在：{args.name}")
-        print(f"# {rot.name}（{rot.role}）\n{rot.body}")
+        print(f"# {rot_item.name}（{rot_item.role}）\n{rot_item.body}")
         return
     if args.action == "disable":
         if not store.set_rot_enabled(args.name, False):

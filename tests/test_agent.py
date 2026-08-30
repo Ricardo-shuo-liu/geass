@@ -167,9 +167,7 @@ def test_status_events_emitted():
 
 def test_vision_fallback_when_model_rejects_images():
     script = [
-        BadRequestError(
-            "Failed to deserialize: unknown variant `image_url`, expected `text`"
-        ),
+        BadRequestError("Failed to deserialize: unknown variant `image_url`, expected `text`"),
         FakeResponse(
             message=FakeMessage(
                 tool_calls=[
@@ -242,18 +240,13 @@ def test_plan_tool_records_plan_and_injects_reminder():
     assert agent.plan is not None
     assert agent.plan.difficulty == "hard"
     assert len(agent.plan.steps) == 3
-    assert any(
-        event.get("state") == "planned" and event.get("plan")
-        for event in events
-    )
+    assert any(event.get("state") == "planned" and event.get("plan") for event in events)
     second_request_contents = [
         message["content"]
         for message in client.requests[1]["messages"]
         if isinstance(message["content"], str)
     ]
-    assert any(
-        "任务计划（困难任务）" in content for content in second_request_contents
-    )
+    assert any("任务计划（困难任务）" in content for content in second_request_contents)
 
 
 def test_plan_tool_resets_between_runs():
@@ -303,7 +296,7 @@ def test_browser_tool_calls_browser_module(monkeypatch):
         captured["url"] = url
         return {"ok": True, "message": "opened", "action": action, "url": url}
 
-    monkeypatch.setattr("geass.agent.browser.open_page", fake_open_page)
+    monkeypatch.setattr("geass.tools.browser.open_page", fake_open_page)
     script = [
         FakeResponse(
             message=FakeMessage(
@@ -390,9 +383,7 @@ def test_memory_tools_hidden_when_disabled():
     )
     agent.memory = None
     asyncio.run(agent.run("任务"))
-    names = {
-        tool["function"]["name"] for tool in client.requests[0]["tools"]
-    }
+    names = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
     assert "remember" not in names
     assert "plan" in names
     assert "browser" in names
@@ -438,8 +429,7 @@ def test_text_mode_with_ocr_keeps_mouse_tools_and_transcript():
     assert "PaddleOCR" in messages_text
     assert "[0.500,0.500] hello" in messages_text
     assert not any(
-        isinstance(message.get("content"), list)
-        for message in first_request["messages"]
+        isinstance(message.get("content"), list) for message in first_request["messages"]
     )
 
 
@@ -587,9 +577,7 @@ def test_window_info_tool_reports_active_window(monkeypatch):
         for message in client.requests[0]["messages"]
         if message.get("role") == "tool"
     ]
-    window_result = next(
-        result_ for result_ in tool_results if "active_window" in result_
-    )
+    window_result = next(result_ for result_ in tool_results if "active_window" in result_)
     assert window_result["active_window"]["name"] == "Firefox — 新标签页"
     assert window_result["count"] == 2
 
@@ -620,7 +608,7 @@ def test_hard_browser_task_plans_launches_and_verifies(monkeypatch):
             }
         ]
 
-    monkeypatch.setattr("geass.agent.browser.open_page", fake_open_page)
+    monkeypatch.setattr("geass.tools.browser.open_page", fake_open_page)
     monkeypatch.setattr("geass.io.accessibility.list_windows", fake_list_windows)
     script = [
         FakeResponse(
@@ -675,18 +663,13 @@ def test_hard_browser_task_plans_launches_and_verifies(monkeypatch):
     assert launched == [("new_tab", "")]
     assert agent.plan is not None
     assert agent.plan.difficulty == "hard"
-    assert any(
-        event.get("state") == "planned" and event.get("plan")
-        for event in events
-    )
+    assert any(event.get("state") == "planned" and event.get("plan") for event in events)
     tool_results = [
         json.loads(message["content"])
         for message in client.requests[0]["messages"]
         if message.get("role") == "tool"
     ]
-    verified = next(
-        result_ for result_ in tool_results if "active_window" in result_
-    )
+    verified = next(result_ for result_ in tool_results if "active_window" in result_)
     assert verified["active_window"]["name"] == "Firefox — 新标签页"
 
 
@@ -753,3 +736,180 @@ def test_schedule_tool_persist_requires_confirmation_then_confirm(tmp_path):
     assert confirmed["ok"] is True
     assert confirmed["job"]["persistent"] is True
     assert store.list()[0].status == "pending"
+
+
+class ExplodingBackend(FakeBackend):
+    def click(self, x, y, button="left"):
+        raise RuntimeError("boom")
+
+
+def test_model_retry_recovers_from_transient_error():
+    client = FakeOpenAI(
+        [
+            TimeoutError("connect timeout"),
+            TimeoutError("connect timeout"),
+            FakeResponse(message=FakeMessage(content="恢复后完成")),
+        ]
+    )
+    agent = Agent(
+        client=client,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(
+            model="gpt-test",
+            max_steps=5,
+            model_max_retries=3,
+            model_retry_base_delay=0.0,
+        ),
+    )
+
+    result = asyncio.run(agent.run("任务"))
+
+    assert result["state"] == "done"
+    assert result["message"] == "恢复后完成"
+    assert len(client.requests) == 3
+
+
+def test_non_retryable_error_is_fed_back_and_recovers():
+    client = FakeOpenAI(
+        [
+            ValueError("bad request"),
+            FakeResponse(message=FakeMessage(content="换方法后完成")),
+        ]
+    )
+    agent = Agent(
+        client=client,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(model="gpt-test", max_steps=5, model_max_retries=0),
+    )
+
+    result = asyncio.run(agent.run("任务"))
+
+    assert result["state"] == "done"
+    last_user = client.requests[1]["messages"][-1]
+    assert last_user["role"] == "user"
+    assert "上次模型调用失败" in str(last_user["content"])
+
+
+def test_model_fail_limit_aborts_task():
+    client = FakeOpenAI([ValueError("boom") for _ in range(5)])
+    agent = Agent(
+        client=client,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(
+            model="gpt-test",
+            max_steps=5,
+            model_max_retries=0,
+            model_fail_limit=3,
+        ),
+    )
+
+    result = asyncio.run(agent.run("任务"))
+
+    assert result["state"] == "error"
+    assert "模型调用失败" in result["message"]
+
+
+def test_cancel_during_backoff_returns_cancelled():
+    client = FakeOpenAI([TimeoutError("connect timeout")])
+    agent = Agent(
+        client=client,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(
+            model="gpt-test",
+            max_steps=5,
+            model_max_retries=3,
+            model_retry_base_delay=10.0,
+        ),
+    )
+    cancel = asyncio.Event()
+
+    async def run_and_cancel():
+        task = asyncio.create_task(agent.run("任务", cancel=cancel))
+        await asyncio.sleep(0.02)
+        cancel.set()
+        return await task
+
+    result = asyncio.run(run_and_cancel())
+
+    assert result["state"] == "cancelled"
+
+
+def test_unexpected_tool_exception_does_not_kill_task():
+    script = [
+        FakeResponse(
+            message=FakeMessage(
+                tool_calls=[
+                    FakeToolCall("call_1", "click", '{"x": 0.5, "y": 0.5}'),
+                    FakeToolCall("call_2", "finish", '{"summary": "完成"}'),
+                ]
+            )
+        )
+    ]
+    agent, backend, client = build(script, backend=ExplodingBackend())
+
+    result = asyncio.run(agent.run("点击"))
+
+    assert result["state"] == "done"
+    tool_messages = [
+        json.loads(message["content"])
+        for message in client.requests[0]["messages"]
+        if message.get("role") == "tool"
+    ]
+    assert any("执行异常" in item.get("error", "") for item in tool_messages)
+
+
+def test_ocr_probe_cools_down_and_recovers():
+    class CountingOCR:
+        def __init__(self):
+            self.calls = 0
+            self.ok = False
+
+        def read(self, image):
+            self.calls += 1
+            return OCRResult(ok=self.ok)
+
+    ocr = CountingOCR()
+    agent = Agent(
+        client=None,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(model="x", ocr_retry_base_delay=5.0, ocr_retry_max_delay=120.0),
+        ocr=ocr,
+    )
+
+    assert asyncio.run(agent._ensure_ocr_ready()) is False
+    assert ocr.calls == 1
+    # 冷却期内不重复探测
+    assert asyncio.run(agent._ensure_ocr_ready()) is False
+    assert ocr.calls == 1
+    # 越过冷却后重新探测，失败计数继续增长
+    agent._ocr_last_attempt -= 1000.0
+    assert asyncio.run(agent._ensure_ocr_ready()) is False
+    assert ocr.calls == 2
+    # 恢复成功后清零失败计数
+    ocr.ok = True
+    agent._ocr_last_attempt -= 1000.0
+    assert asyncio.run(agent._ensure_ocr_ready()) is True
+    assert ocr.calls == 3
+    assert agent._ocr_failures == 0
+
+
+def test_system_prompt_wraps_untrusted_context(tmp_path):
+    memory = Memory(tmp_path / ".memory")
+    memory.remember("偏好", "记住这个")
+    agent = Agent(
+        client=None,
+        backend=FakeBackend(),
+        capture=FakeCapture(),
+        config=AgentConfig(model="x"),
+        memory=memory,
+    )
+
+    prompt = agent._system_prompt("查询", rag_context="外部片段")
+
+    assert "<<<UNTRUSTED-BEGIN>>>" in prompt
+    assert "<<<UNTRUSTED-END>>>" in prompt

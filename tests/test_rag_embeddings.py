@@ -53,9 +53,7 @@ def test_provider_probe_failure_returns_false(monkeypatch):
         base_url="https://example.com/v1",
         model="fake-embed",
     )
-    monkeypatch.setattr(
-        provider, "_ensure_client", lambda: FakeEmbeddingClient(fail=True)
-    )
+    monkeypatch.setattr(provider, "_ensure_client", lambda: FakeEmbeddingClient(fail=True))
 
     assert provider.probe() == (False, 0)
 

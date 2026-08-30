@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 from geass.dispatch import commands_main, reset_main
 
 

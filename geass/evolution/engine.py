@@ -4,6 +4,7 @@
 持久记忆与最近任务历史交给模型，让模型判断是否值得新增一个底层、通用的
 SKILL，并把结果写入运行时 SKILL 根目录（``.system/`` 之外）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,9 +12,11 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
+from ..safety import check_injected_content
 from ..skills import (
     FRONTMATTER_RE,
     Skill,
@@ -41,9 +44,9 @@ EVOLUTION_SYSTEM_PROMPT = (
     "terminal_close/browser/window_info/find_text/find_element/screenshot/"
     "wait/plan/remember/recall/finish；\n"
     "3. 信息不足或没有新价值时 create=false；\n"
-    "4. 输出严格 JSON：{\"create\": bool, \"name\": \"小写短横线\", "
-    "\"description\": \"何时使用\", \"body\": \"SKILL 正文（不含 frontmatter）\", "
-    "\"reason\": \"简短理由\"}。"
+    '4. 输出严格 JSON：{"create": bool, "name": "小写短横线", '
+    '"description": "何时使用", "body": "SKILL 正文（不含 frontmatter）", '
+    '"reason": "简短理由"}。'
 )
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None]]
@@ -91,9 +94,7 @@ class EvolutionEngine:
             return
         try:
             self.evolution_dir.mkdir(parents=True, exist_ok=True)
-            line = json.dumps(
-                {"time": time.time(), "command": text}, ensure_ascii=False
-            )
+            line = json.dumps({"time": time.time(), "command": text}, ensure_ascii=False)
             with self.tasks_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
             self._trim_history()
@@ -164,11 +165,7 @@ class EvolutionEngine:
             except asyncio.TimeoutError:
                 pass
 
-            if (
-                not self.config.evolution_enabled
-                or self.client is None
-                or self._running
-            ):
+            if not self.config.evolution_enabled or self.client is None or self._running:
                 continue
             if self._idle_seconds() < self.config.evolution_idle_seconds:
                 continue
@@ -189,7 +186,7 @@ class EvolutionEngine:
 
     async def evolve_once(self) -> dict[str, Any]:
         result = await self._evolve_skills_once()
-        if self.pot is not None and getattr(self.config, "pot_enabled", True):
+        if self.pot is not None and self.config.pot_enabled:
             try:
                 await self._evolve_pot()
             except Exception:
@@ -200,9 +197,7 @@ class EvolutionEngine:
         sync_system_skills(self.source_dir, self.root)
         existing = load_skills(self.root)
         existing_names = {skill.name for skill in existing}
-        evolved_count = sum(
-            1 for skill in existing if skill.path.parent == self.root
-        )
+        evolved_count = sum(1 for skill in existing if skill.path.parent == self.root)
         if evolved_count >= self.config.evolution_max_skills:
             return {"created": False, "reason": "已达自动生成技能数量上限"}
 
@@ -222,18 +217,20 @@ class EvolutionEngine:
 
         name = self._pick_name(str(payload.get("name") or ""), existing_names)
         description = str(payload.get("description") or "").strip()[:300] or name
-        body = FRONTMATTER_RE.sub(
-            "", str(payload.get("body") or ""), count=1
-        ).strip()[:8000]
+        body = FRONTMATTER_RE.sub("", str(payload.get("body") or ""), count=1).strip()[:8000]
         if not body:
             return {"created": False, "reason": "模型未生成 SKILL 正文"}
+        injection_reason = check_injected_content(body)
+        if injection_reason is not None:
+            self._log_event({"type": "reject", "name": name, "reason": injection_reason})
+            return {
+                "created": False,
+                "reason": f"SKILL 正文疑似包含指令覆盖内容（{injection_reason}），已拒绝",
+            }
 
         skill_dir = self.root / name
         skill_dir.mkdir(parents=True, exist_ok=True)
-        content = (
-            f"---\nname: {name}\ndescription: {description}\n---\n\n"
-            f"{body.strip()}\n"
-        )
+        content = f"---\nname: {name}\ndescription: {description}\n---\n\n{body.strip()}\n"
         (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
         self._log_event(
             {
@@ -259,20 +256,20 @@ class EvolutionEngine:
             self.pot.append_trace(entry)
 
     async def _evolve_pot(self) -> dict[str, Any]:
-        traces = self.pot.recent_traces(20)
+        pot = self.pot
+        if pot is None:
+            return {"created": False, "reason": "POT 未启用"}
+        traces = pot.recent_traces(20)
         if not traces:
             return {"created": False, "reason": "没有可反思的交流痕迹"}
-        cot = self.pot.get_cot()
-        rots = self.pot.list_rots()
+        cot = pot.get_cot()
+        rots = pot.list_rots()
         trace_text = "\n".join(
             f"- [{entry.get('time', '')}] {entry.get('command', '')}"
             f"（结果：{entry.get('result', '')}）"
             for entry in traces[-20:]
         )
-        rot_text = "\n".join(
-            f"- {rot.name}: {rot.description}"
-            for rot in rots
-        ) or "（无）"
+        rot_text = "\n".join(f"- {rot.name}: {rot.description}" for rot in rots) or "（无）"
         prompt = (
             "## 当前 Global-COT\n"
             f"{cot or '（空）'}\n\n"
@@ -281,9 +278,9 @@ class EvolutionEngine:
             "## 最近交流痕迹\n"
             f"{trace_text}\n\n"
             "请反思这些痕迹，输出严格 JSON："
-            "{\"cot_update\": string|null, \"rot_create\": [{\"name\", "
-            "\"description\", \"role\", \"body\"}], "
-            "\"rot_update\": [{\"name\", \"description\", \"role\", \"body\"}]}。"
+            '{"cot_update": string|null, "rot_create": [{"name", '
+            '"description", "role", "body"}], '
+            '"rot_update": [{"name", "description", "role", "body"}]}。'
             "cot_update 是通用问题解决范式的改进；rot 以某个角色视角形成思考方式。"
         )
         messages = [
@@ -299,9 +296,7 @@ class EvolutionEngine:
         kwargs = {
             "model": self.config.model,
             "messages": messages,
-            "max_tokens": int(
-                getattr(self.config, "pot_reflect_max_tokens", 2500)
-            ),
+            "max_tokens": int(self.config.pot_reflect_max_tokens),
         }
         try:
             response = await self.client.chat.completions.create(
@@ -317,20 +312,22 @@ class EvolutionEngine:
         cot_updated = False
         cot_update = str(payload.get("cot_update") or "").strip()
         if cot_update:
-            self.pot.set_cot(cot_update[:8000])
-            cot_updated = True
+            if check_injected_content(cot_update) is None:
+                pot.set_cot(cot_update[:8000])
+                cot_updated = True
 
         rots_saved: list[str] = []
-        for item in list(payload.get("rot_create") or []) + list(
-            payload.get("rot_update") or []
-        ):
+        for item in list(payload.get("rot_create") or []) + list(payload.get("rot_update") or []):
             if not isinstance(item, dict) or not item.get("name"):
                 continue
-            rot = self.pot.save_rot(
+            body = str(item.get("body") or "")
+            if check_injected_content(body) is not None:
+                continue
+            rot = pot.save_rot(
                 str(item["name"]),
                 str(item.get("description") or ""),
                 str(item.get("role") or ""),
-                str(item.get("body") or ""),
+                body,
             )
             rots_saved.append(rot.name)
 
@@ -341,7 +338,11 @@ class EvolutionEngine:
                 "rots": rots_saved,
                 "message": (
                     "POT 反思完成"
-                    + (f"：更新 COT，新增/更新 {len(rots_saved)} 个 ROT" if rots_saved else "：未产生新 ROT")
+                    + (
+                        f"：更新 COT，新增/更新 {len(rots_saved)} 个 ROT"
+                        if rots_saved
+                        else "：未产生新 ROT"
+                    )
                 ),
             }
         )
@@ -376,17 +377,13 @@ class EvolutionEngine:
         memory_entries: list[str],
         history: list[str],
     ) -> dict[str, Any]:
-        catalog = "\n".join(
-            f"- {skill.name}: {skill.description}" for skill in existing
-        ) or "（无）"
+        catalog = (
+            "\n".join(f"- {skill.name}: {skill.description}" for skill in existing) or "（无）"
+        )
         if len(catalog) > CONTEXT_CATALOG_CHARS:
             catalog = catalog[:CONTEXT_CATALOG_CHARS] + "…（已裁剪）"
-        memory_text = "\n".join(
-            f"- {entry}" for entry in memory_entries
-        ) or "（无）"
-        history_text = "\n".join(
-            f"- {command}" for command in history
-        ) or "（无）"
+        memory_text = "\n".join(f"- {entry}" for entry in memory_entries) or "（无）"
+        history_text = "\n".join(f"- {command}" for command in history) or "（无）"
         user_prompt = (
             "## 已有 SKILL\n"
             f"{catalog}\n\n"
@@ -403,9 +400,7 @@ class EvolutionEngine:
         kwargs = {
             "model": self.config.model,
             "messages": messages,
-            "max_tokens": int(
-                getattr(self.config, "evolution_max_tokens", 2000)
-            ),
+            "max_tokens": int(self.config.evolution_max_tokens),
         }
         response = None
         try:
@@ -446,9 +441,7 @@ class EvolutionEngine:
             self.evolution_dir.mkdir(parents=True, exist_ok=True)
             payload = {"time": time.time(), **payload}
             line = json.dumps(payload, ensure_ascii=False)
-            with (self.evolution_dir / "history.jsonl").open(
-                "a", encoding="utf-8"
-            ) as handle:
+            with (self.evolution_dir / "history.jsonl").open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
         except OSError:
             logger.warning("进化事件写入失败", exc_info=True)

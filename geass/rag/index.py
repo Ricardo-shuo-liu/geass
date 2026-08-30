@@ -1,4 +1,5 @@
 """向量索引：余弦相似度；faiss 可用时自动加速，否则纯 Python。"""
+
 from __future__ import annotations
 
 import math
@@ -28,7 +29,7 @@ def cosine_similarity(left: list[float], right: list[float]) -> float:
     dot = 0.0
     norm_left = 0.0
     norm_right = 0.0
-    for a, b in zip(left, right):
+    for a, b in zip(left, right, strict=True):
         dot += a * b
         norm_left += a * a
         norm_right += b * b
@@ -60,9 +61,7 @@ class VectorIndex:
             return self._search_faiss(query, limit)
         return self._search_python(query, limit)
 
-    def _search_python(
-        self, query: list[float], limit: int
-    ) -> list[tuple[int, float]]:
+    def _search_python(self, query: list[float], limit: int) -> list[tuple[int, float]]:
         if _numpy_available():
             import numpy
 
@@ -81,19 +80,12 @@ class VectorIndex:
             ]
 
         scored = [
-            (index, cosine_similarity(query, vector))
-            for index, vector in enumerate(self.vectors)
+            (index, cosine_similarity(query, vector)) for index, vector in enumerate(self.vectors)
         ]
         scored.sort(key=lambda item: item[1], reverse=True)
-        return [
-            (index, round(score, 4))
-            for index, score in scored[:limit]
-            if score > 0
-        ]
+        return [(index, round(score, 4)) for index, score in scored[:limit] if score > 0]
 
-    def _search_faiss(
-        self, query: list[float], limit: int
-    ) -> list[tuple[int, float]]:
+    def _search_faiss(self, query: list[float], limit: int) -> list[tuple[int, float]]:
         import faiss
         import numpy
 
@@ -105,11 +97,9 @@ class VectorIndex:
             self._faiss_index = index
         query_array = numpy.asarray([query], dtype="float32")
         faiss.normalize_L2(query_array)
-        scores, indexes = self._faiss_index.search(
-            query_array, min(limit, len(self.vectors))
-        )
+        scores, indexes = self._faiss_index.search(query_array, min(limit, len(self.vectors)))
         return [
             (int(index), round(float(score), 4))
-            for index, score in zip(indexes[0], scores[0])
+            for index, score in zip(indexes[0], scores[0], strict=True)
             if int(index) >= 0 and float(score) > 0
         ]

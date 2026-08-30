@@ -43,8 +43,6 @@ def test_pot_tools_via_agent(tmp_path):
     assert listed["ok"] is True
     assert len(listed["rots"]) == 1
 
-    used = asyncio.run(
-        agent._execute("pot_use", {"name": "工程师视角"})
-    )
+    used = asyncio.run(agent._execute("pot_use", {"name": "工程师视角"}))
     assert used["ok"] is True
     assert agent.pinned_rot == "工程师视角"

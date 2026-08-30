@@ -5,9 +5,7 @@ from geass.server.state import build_state
 from .conftest import make_config
 
 
-def test_build_state_syncs_seed_skills_into_runtime_root(
-    tmp_path, monkeypatch
-):
+def test_build_state_syncs_seed_skills_into_runtime_root(tmp_path, monkeypatch):
     monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
     source = tmp_path / "skills"
     (source / "alpha").mkdir(parents=True)

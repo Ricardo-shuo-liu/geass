@@ -101,15 +101,16 @@ Geass 是一个"手机指挥电脑"的系统：
 
 ## 5. 模块说明
 
-- `geass/paisley_park/` 对应实现中的 `geass/agent.py` + `geass/server/`：Agent 循环、协议、编排；
-- `geass/tasks.py`：任务计划数据模型（difficulty/goal/steps/current_step），
+- `geass/agent.py` + `geass/server/`：Agent 循环、协议、编排（原设计代号 Paisley-Park）；
+- `geass/tools.py`：工具注册表（schema、模式元数据与处理器集中登记，Agent 查表分发）；
+- `geass/tasks/`：任务计划数据模型（difficulty/goal/steps/current_step），
   由 `plan` 工具驱动；
-- `geass/memory.py`：JSON 文件持久记忆（原子写入、关键字检索、容量上限）；
+- `geass/memory/`：JSON 文件持久记忆（原子写入、关键字检索、容量上限）；
 - `geass/evolution/`：空闲进化引擎（活动时间检测、任务历史、模型生成
   SKILL、事件日志与状态广播）+ POT 反思（cot/rot/trace 存储与注入）；
 - `geass/cli/`：终端助手（Rich TUI、light/deliberate 双模式、资产工具）；
-- `geass/cli.py`：统一命令分发器与运维命令；
-- `geass/scheduler.py`：定时任务存储（`~/.geass/.schedule/jobs.json`）与
+- `geass/dispatch.py`：统一命令分发器与运维命令；
+- `geass/scheduler/`：定时任务存储（`~/.geass/.schedule/jobs.json`）与
   后台触发循环（到期执行、忙碌 5 秒重试、状态事件）；
 - `geass/rag/`：RAG 包（store 存储与同名镜像、chunker 分块过滤、
   embeddings 可插拔 Provider、lexical 词法检索、index 向量索引、CLI）；
@@ -172,7 +173,7 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 ### 6.2 Agent 工具与坐标约定
 
 - 坐标一律为 0–1 归一化值，相对当前截图的左上角；服务端按真实分辨率换算，截图缩放不影响定位；
-- 工具 schema 见 `geass/agent.py` 的 `TOOLS`，动作命名对齐 OpenAI computer-use 词表，便于未来迁移；
+- 工具 schema 见 `geass/tools.py` 的 `TOOL_REGISTRY`，动作命名对齐 OpenAI computer-use 词表，便于未来迁移；
 - 键鼠经 `InputBackend` 落到 pyautogui：ASCII 逐键输入，中文等非 ASCII 文本走剪贴板粘贴（Linux 需要 `xclip`/`xsel`），按键名有跨平台别名归一化；
 - 语义定位工具：`find_text`（PaddleOCR 反查文本，返回文本框中心归一化坐标）、`find_element`（AT-SPI 按控件名/角色查找，返回控件中心归一化坐标）；系统提示要求「点击前先用语义定位拿坐标、能用键盘就用键盘」，避免模型凭空估计坐标；
 - 终端工具：`open_terminal`（开窗 + 一键命令，返回 `session_id`/`output`）、`terminal_type`（流式输入）、`terminal_read`（读取新输出）、`terminal_close`（关闭会话）；
@@ -212,10 +213,11 @@ Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-W
 ## 8. 安全模型
 
 - 键鼠操作 + `open_terminal`（按模型意图在新终端窗口执行 shell 命令，无文件读写工具）；
-- **安全边界**：`open_terminal` 的非空命令先过内置黑名单（提权、递归删除、磁盘/分区、关机重启、systemctl、SIGKILL、账户、破坏性 git、下载即执行、反弹 shell、卸载软件），命中即暂停 Agent 并广播 `approval_request`，手机端允许才执行；拒绝/超时（默认 30 秒）把错误回填给模型，让其改换方式；`[security]` 可关闭或替换正则列表；
+- **安全边界**：`open_terminal` 的非空命令与 `terminal_type` 的可执行输入（`press_enter=true`、含换行或整体命中黑名单）先过内置黑名单（提权、递归删除、磁盘/分区、关机重启、systemctl、SIGKILL、账户、破坏性 git、下载即执行、反弹 shell、卸载软件、管道进 shell、解码执行、eval/source），规则对原始串与 `shlex` 规范化结果各跑一遍；命中即暂停 Agent 并广播 `approval_request`，手机端允许才执行；拒绝/超时（默认 30 秒）把错误回填给模型，让其改换方式；`[security]` 可关闭或替换正则列表；
 - `read_skill` 只读取已扫描的 `SKILL.md` 与目录清单，不提供任意文件读取；技能正文只能指引 Agent 使用已有工具；
 - 局域网 + Token（**每次启动随机生成**并在控制台打印，`GEASS_TOKEN` 可显式固定）；
 - 手机端随时可停止；Agent 单任务有步数上限；
+- 提示注入：进化/POT 生成的产物在落盘前做指令覆盖短语校验，记忆与 RAG 注入时用 `<<<UNTRUSTED-*>>>` 定界符包裹并在系统提示中声明其为参考数据而非指令；属于启发式防御，不承诺完全免疫；
 - 隐私：截图会发送至配置的模型服务商；启用 OCR 时还会上传至 PaddleOCR AI Studio API，敏感窗口请自行规避；持久记忆的匹配条目也会注入系统提示并发送给模型，请勿用 `remember` 保存密码等敏感信息；后续可加本地 OCR/脱敏。
 
 ## 9. 配置
@@ -272,7 +274,7 @@ RAG：`agent.rag_enabled`（默认 true）、`agent.rag_inject_enabled`（默认
 `text-embedding-3-small`）。数据源按相对路径镜像，模型指纹不匹配时
 `needs_reindex` 并降级词法。
 
-默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `gpt-5.6-terra`（可改为 `deepseek-chat` / `deepseek-v4-flash` 等）、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒、记忆开启、进化开启且空闲 300 秒触发、定时任务目录 `~/.geass/.schedule`。
+默认：`0.0.0.0:8765`、fps=15、JPEG quality=70、最大宽度 1920、模型 `deepseek-v4-flash`、视觉白名单为空（回退 `vision=true`）、Agent 用图长边 ≤1568、步数上限 30、OCR 模型 `PaddleOCR-VL-1.6`、OCR 等待上限 90 秒、终端输出等待 15 秒、安全边界开启且审核超时 30 秒、记忆开启、进化开启且空闲 300 秒触发、定时任务目录 `~/.geass/.schedule`。
 
 ## 10. 路线图
 
@@ -285,17 +287,18 @@ RAG：`agent.rag_enabled`（默认 true）、`agent.rag_inject_enabled`（默认
 - 模型用图降采样（长边 ≤1568）控制图像 token 成本；
 - 帧流只推最新帧、队列容量 1 自动丢帧；
 - 建议用屏幕变化检测替代固定 sleep（后续迭代）；
-- 默认模型 `gpt-5.6-terra`，可在配置切换 `sol`/`luna`；具体可用性与计费实施时以 OpenAI API 为准。
+- 默认模型 `deepseek-v4-flash`，可在配置切换其他 OpenAI 兼容模型；具体可用性与计费实施时以所选模型服务商为准。
 
 ## 12. 已知限制
 
 - 仅支持 Linux X11（当前实现）；Windows/macOS/Wayland 待适配；
+- 多显示器：只抓取并操作主显示器（`mss.monitors[1]`），坐标按主屏归一化，第二块屏幕上的目标无法定位；`python -m geass.check` 与启动横幅会给出提示；
 - 可见终端优先经 `x-terminal-emulator`（gnome-terminal 显式加 `--wait`，避免 dbus 激活导致客户端立即退出被误判为失败）；启动窗口时会剔除继承的 snap GTK 环境变量——从 VS Code（snap 版）集成终端启动服务时，`GTK_PATH` 等会让 gnome-terminal 加载 snap 的 GTK 模块，把 `/snap/core20` 库路径注入链接器搜索路径，导致 `__libc_pthread_init / GLIBC_PRIVATE` 崩溃；命令完成检测默认用交互式 bash 的 `PROMPT_COMMAND` 写独立边带文件（窗口里不出现 `GEASS_P1=...` 之类的内部哨兵），无 bash 时退回 sentinel 方式；输出捕获依赖 Linux 下的 `script`（无 `script` 时用 `tee` 兜底，交互式程序体验会下降）；macOS/Windows 当前仍走旧的“只开窗、不捕获”路径；
 - PaddleOCR 为可选远程服务；未配置 AI Studio Token 时非视觉模型退化为键盘-only；
 - 中文等非 ASCII 输入走剪贴板粘贴，Linux 依赖 `xclip`/`xsel`；缺失时退回逐键输入，IME 支持差；
 - 手机经局域网 HTTP 访问时 Web Speech API 不可用（需安全上下文），自动走录音上传转写；
 - Service Worker/PWA 安装同样需要安全上下文，局域网下退化为普通网页；
-- 安全边界 v1 只审核 `open_terminal` 带命令的调用；`terminal_type` 流式输入与键鼠工具不在审核范围，理论上仍可绕过（后续版本扩展）。
+- 安全边界只审核 `open_terminal` 与 `terminal_type`（可执行输入）；`key_press`/`type_text`/剪贴板粘贴仍不在审核范围，理论上仍可绕过（后续版本扩展）。
 - `find_element` 与 `window_info` 依赖 Linux 的 AT-SPI；Electron/自绘应用可能不暴露控件树或窗口标题，找不到时模型退回截图估计坐标；Ubuntu/Debian 的 `python3-pyatspi` 需由 apt 安装（不是 pip 包），当 conda 环境的 Python 版本与系统 Python 不同时，会经系统 Python 桥接进程查询。
 - `browser` 在 Linux 上最可靠：`new_tab`/`new_window` 优先探测
   Chrome/Chromium/Firefox 等常见浏览器 CLI，找不到才回退 `xdg-open`；

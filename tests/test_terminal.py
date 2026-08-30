@@ -7,16 +7,16 @@ import subprocess
 
 import pytest
 
+from geass.io.shell import terminal_env
 from geass.io.terminal import (
+    TerminalError,
     TerminalManager,
     TerminalSession,
-    TerminalError,
     _launch_visible_terminal,
     _terminal_candidates,
     clean_ansi,
     extract_output,
 )
-from geass.io.shell import terminal_env
 
 
 def test_clean_ansi_removes_escape_sequences():
@@ -67,20 +67,14 @@ def test_launch_requires_graphical_session(monkeypatch, tmp_path):
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
 
     with pytest.raises(TerminalError, match="图形环境"):
-        _launch_visible_terminal(
-            tmp_path / "input.fifo", tmp_path / "output.log"
-        )
+        _launch_visible_terminal(tmp_path / "input.fifo", tmp_path / "output.log")
 
 
 def test_terminal_env_strips_snap_pollution(monkeypatch):
     monkeypatch.setenv("DISPLAY", ":1")
     monkeypatch.setenv("SNAP_NAME", "code")
-    monkeypatch.setenv(
-        "GTK_PATH", "/snap/code/254/usr/lib/x86_64-linux-gnu/gtk-3.0"
-    )
-    monkeypatch.setenv(
-        "LD_LIBRARY_PATH", "/snap/core20/current/lib:/usr/local/lib"
-    )
+    monkeypatch.setenv("GTK_PATH", "/snap/code/254/usr/lib/x86_64-linux-gnu/gtk-3.0")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib:/usr/local/lib")
     monkeypatch.setenv("KEEP_ME", "yes")
 
     env = terminal_env()
@@ -93,9 +87,7 @@ def test_terminal_env_strips_snap_pollution(monkeypatch):
 
 
 def test_terminal_env_drops_pure_snap_ld_path(monkeypatch):
-    monkeypatch.setenv(
-        "LD_LIBRARY_PATH", "/snap/core20/current/lib:/var/lib/snapd/lib/gl"
-    )
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/snap/core20/current/lib:/var/lib/snapd/lib/gl")
 
     env = terminal_env()
 
@@ -149,8 +141,7 @@ def test_session_execute_with_invisible_marker(tmp_path):
     rcfile = tmp_path / "bashrc"
     os.mkfifo(fifo)
     rcfile.write_text(
-        f"PROMPT_COMMAND='printf x >> {shlex.quote(str(marker_path))}'\n"
-        "PS1='$ '\n",
+        f"PROMPT_COMMAND='printf x >> {shlex.quote(str(marker_path))}'\nPS1='$ '\n",
         encoding="utf-8",
     )
     read_fd = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)

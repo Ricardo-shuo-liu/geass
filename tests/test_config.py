@@ -54,9 +54,7 @@ def test_base_url_and_model_from_file(tmp_path):
 
 def test_env_overrides_base_url_and_key(monkeypatch, tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text(
-        '[agent]\nbase_url = "https://api.openai.com/v1"\n', encoding="utf-8"
-    )
+    path.write_text('[agent]\nbase_url = "https://api.openai.com/v1"\n', encoding="utf-8")
     monkeypatch.setenv("GEASS_BASE_URL", "https://api.deepseek.com")
     monkeypatch.setenv("GEASS_API_KEY", "sk-deepseek")
     monkeypatch.setenv("GEASS_MODEL", "deepseek-v4-flash")
@@ -124,9 +122,7 @@ def test_env_beats_user_env(monkeypatch, tmp_path):
     monkeypatch.setenv("GEASS_HOME", str(home))
     user_env = home / ".geass" / "env.toml"
     user_env.parent.mkdir(parents=True)
-    user_env.write_text(
-        '[agent]\nmodel = "deepseek-chat"\n', encoding="utf-8"
-    )
+    user_env.write_text('[agent]\nmodel = "deepseek-chat"\n', encoding="utf-8")
     monkeypatch.setenv("GEASS_MODEL", "deepseek-reasoner")
     config = load_config(project)
     assert config.agent.model == "deepseek-reasoner"
@@ -193,8 +189,7 @@ def test_ocr_defaults(tmp_path):
 def test_ocr_env_overrides(monkeypatch, tmp_path):
     project = tmp_path / "config.toml"
     project.write_text(
-        '[agent]\nocr_model = "PP-StructureV3"\n'
-        'ocr_base_url = "https://old.test"\n',
+        '[agent]\nocr_model = "PP-StructureV3"\nocr_base_url = "https://old.test"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("GEASS_PADDLEOCR_TOKEN", "env-ocr-token")
@@ -286,10 +281,7 @@ def test_security_defaults(tmp_path):
 def test_security_from_file(tmp_path):
     project = tmp_path / "config.toml"
     project.write_text(
-        "[security]\n"
-        "enabled = false\n"
-        "approval_timeout = 60\n"
-        'patterns = ["^sudo ", "reboot"]\n',
+        '[security]\nenabled = false\napproval_timeout = 60\npatterns = ["^sudo ", "reboot"]\n',
         encoding="utf-8",
     )
 
@@ -302,16 +294,12 @@ def test_security_from_file(tmp_path):
 
 def test_security_user_env_overrides_project(monkeypatch, tmp_path):
     project = tmp_path / "config.toml"
-    project.write_text(
-        '[security]\nenabled = true\napproval_timeout = 60\n', encoding="utf-8"
-    )
+    project.write_text("[security]\nenabled = true\napproval_timeout = 60\n", encoding="utf-8")
     home = tmp_path / "home"
     monkeypatch.setenv("GEASS_HOME", str(home))
     user_env = home / ".geass" / "env.toml"
     user_env.parent.mkdir(parents=True)
-    user_env.write_text(
-        '[security]\nenabled = false\napproval_timeout = 120\n', encoding="utf-8"
-    )
+    user_env.write_text("[security]\nenabled = false\napproval_timeout = 120\n", encoding="utf-8")
 
     config = load_config(project)
 
@@ -321,7 +309,7 @@ def test_security_user_env_overrides_project(monkeypatch, tmp_path):
 
 def test_security_timeout_minimum(tmp_path):
     project = tmp_path / "config.toml"
-    project.write_text('[security]\napproval_timeout = 1\n', encoding="utf-8")
+    project.write_text("[security]\napproval_timeout = 1\n", encoding="utf-8")
 
     config = load_config(project)
 
@@ -370,17 +358,20 @@ def test_vision_whitelist_from_env(monkeypatch, tmp_path):
 
 def test_vision_whitelist_user_env_overrides_project(monkeypatch, tmp_path):
     project = tmp_path / "config.toml"
-    project.write_text(
-        '[agent]\nvision_whitelist = ["gpt-5.6-terra"]\n', encoding="utf-8"
-    )
+    project.write_text('[agent]\nvision_whitelist = ["gpt-5.6-terra"]\n', encoding="utf-8")
     home = tmp_path / "home"
     monkeypatch.setenv("GEASS_HOME", str(home))
     user_env = home / ".geass" / "env.toml"
     user_env.parent.mkdir(parents=True)
-    user_env.write_text(
-        '[agent]\nvision_whitelist = ["sol", "luna"]\n', encoding="utf-8"
-    )
+    user_env.write_text('[agent]\nvision_whitelist = ["sol", "luna"]\n', encoding="utf-8")
 
     config = load_config(project)
 
     assert config.agent.vision_whitelist == ("sol", "luna")
+
+
+def test_default_model_is_deepseek_v4_flash(tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    config = load_config(path)
+    assert config.agent.model == "deepseek-v4-flash"

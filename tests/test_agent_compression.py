@@ -21,9 +21,7 @@ def build_messages() -> list[dict]:
 
 
 def test_context_compression_replaces_early_messages(tmp_path):
-    client = FakeOpenAI(
-        [FakeResponse(message=FakeMessage(content="摘要：用户意图与关键结果"))]
-    )
+    client = FakeOpenAI([FakeResponse(message=FakeMessage(content="摘要：用户意图与关键结果"))])
     agent = Agent(
         client=client,
         backend=None,
@@ -63,8 +61,6 @@ def test_context_compression_fallback_keeps_first_user(tmp_path):
 
     asyncio.run(agent._maybe_compress(messages))
 
-    joined = " ".join(
-        str(message.get("content")) for message in messages
-    )
+    joined = " ".join(str(message.get("content")) for message in messages)
     assert "降级" in joined
     assert "第 0 段" in joined

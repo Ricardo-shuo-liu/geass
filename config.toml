@@ -19,7 +19,7 @@ approval_timeout = 30
 patterns = []
 
 [agent]
-model = "gpt-5.6-terra"
+model = "deepseek-v4-flash"
 # OpenAI 兼容端点地址（留空表示 OpenAI 官方）；DeepSeek 填 https://api.deepseek.com
 # 个人配置建议写入 ~/.geass/env.toml：python -m geass.config set sk-xxx URL MODEL
 base_url = ""
@@ -38,6 +38,13 @@ ocr_base_url = "https://paddleocr.aistudio-app.com"
 ocr_token = ""
 # 单个识别任务最长等待秒数（提交 + 轮询）
 ocr_timeout = 90
+# OCR 探测失败后的冷却退避（秒）：失败后按 base×2^n 冷却，封顶 max
+ocr_retry_base_delay = 5.0
+ocr_retry_max_delay = 120.0
+# 模型调用容错：单次调用重试次数、退避基础延时（秒）、连续失败步数上限
+model_max_retries = 3
+model_retry_base_delay = 2.0
+model_fail_limit = 3
 max_steps = 30
 image_max_edge = 1568
 # open_terminal 一键执行命令时等待输出的超时（秒）

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import requests
 from PIL import Image
 
@@ -119,13 +120,7 @@ def test_structure_v3_overall_ocr_res():
 def test_markdown_fallback_when_no_boxes():
     backend = PaddleOCRBackend(token="tok")
     lines = [
-        {
-            "result": {
-                "layoutParsingResults": [
-                    {"markdown": {"text": "plain page", "images": {}}}
-                ]
-            }
-        }
+        {"result": {"layoutParsingResults": [{"markdown": {"text": "plain page", "images": {}}}]}}
     ]
 
     boxes = backend._parse_response(lines, (100, 100))
@@ -148,9 +143,7 @@ def test_missing_token_fails_fast():
 def test_failed_job_reports_error(monkeypatch):
     fake = FakeRequests(
         post_response=FakeResponse(200, {"data": {"jobId": "job-1"}}),
-        poll_responses=[
-            FakeResponse(200, {"data": {"state": "failed", "errorMsg": "boom"}})
-        ],
+        poll_responses=[FakeResponse(200, {"data": {"state": "failed", "errorMsg": "boom"}})],
         result_response=FakeResponse(200, text=""),
     )
     monkeypatch.setattr("geass.ocr.requests", fake)
@@ -194,10 +187,7 @@ def test_network_error_is_reported(monkeypatch):
 def test_poll_timeout(monkeypatch):
     fake = FakeRequests(
         post_response=FakeResponse(200, {"data": {"jobId": "job-1"}}),
-        poll_responses=[
-            FakeResponse(200, {"data": {"state": "pending"}})
-        ]
-        * 10,
+        poll_responses=[FakeResponse(200, {"data": {"state": "pending"}})] * 10,
         result_response=FakeResponse(200, text=""),
     )
     monkeypatch.setattr("geass.ocr.requests", fake)
@@ -247,3 +237,36 @@ def test_transcript_includes_coordinates():
     assert "[0.100,0.500] first" in text
     assert "[0.200,0.500] second" in text
     assert text.index("first") < text.index("second")
+
+
+def test_submit_retries_once_on_transient_error(monkeypatch):
+    calls: list[str] = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        if len(calls) == 1:
+            raise requests.ConnectionError("boom")
+        return FakeResponse(200, {"data": {"jobId": "job-1"}})
+
+    monkeypatch.setattr("geass.ocr.requests.post", fake_post)
+    monkeypatch.setattr("geass.ocr.time.sleep", lambda _: None)
+    backend = PaddleOCRBackend(token="tok")
+
+    assert backend._submit(Image.new("RGB", (10, 10))) == "job-1"
+    assert len(calls) == 2
+
+
+def test_submit_surrenders_after_two_failures(monkeypatch):
+    calls: list[str] = []
+
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        raise requests.ConnectionError("boom")
+
+    monkeypatch.setattr("geass.ocr.requests.post", fake_post)
+    monkeypatch.setattr("geass.ocr.time.sleep", lambda _: None)
+    backend = PaddleOCRBackend(token="tok")
+
+    with pytest.raises(ocr_module.OCRRemoteError):
+        backend._submit(Image.new("RGB", (10, 10)))
+    assert len(calls) == 2

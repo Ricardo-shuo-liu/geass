@@ -1,4 +1,5 @@
 """无 socket 的 ASGI WebSocket 测试驱动：在同一事件循环内直连 app。"""
+
 from __future__ import annotations
 
 import asyncio

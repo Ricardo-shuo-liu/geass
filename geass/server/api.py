@@ -1,4 +1,5 @@
 """REST 接口：健康检查、信息、配置、语音兜底转写、停止 Agent。"""
+
 from __future__ import annotations
 
 import shutil
@@ -8,6 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
+from .. import __version__
 from ..config import load_config, mask_secret, save_user_env
 from ..memory import default_memory_path
 from ..safety import default_patterns
@@ -69,15 +71,13 @@ def config_summary(state) -> dict[str, Any]:
         "ocr_token": mask_secret(state.config.agent.ocr_token),
         "ocr_configured": bool(state.config.agent.ocr_token),
         "skills_dir": state.config.agent.skills_dir,
-        "skill_root": state.config.agent.skill_root
-        or str(resolve_skill_root(None)),
+        "skill_root": state.config.agent.skill_root or str(resolve_skill_root(None)),
         "evolution_enabled": state.config.agent.evolution_enabled,
         "evolution_idle_seconds": state.config.agent.evolution_idle_seconds,
         "evolution_interval": state.config.agent.evolution_interval,
         "evolution_max_skills": state.config.agent.evolution_max_skills,
         "memory_enabled": state.config.agent.memory_enabled,
-        "memory_path": state.config.agent.memory_path
-        or str(default_memory_path()),
+        "memory_path": state.config.agent.memory_path or str(default_memory_path()),
         "memory_max_entries": state.config.agent.memory_max_entries,
         "api_key": mask_secret(state.config.api_key),
         "api_configured": bool(state.client),
@@ -85,9 +85,7 @@ def config_summary(state) -> dict[str, Any]:
         "vision_whitelist": list(state.config.agent.vision_whitelist),
         "security_enabled": state.config.security.enabled,
         "security_approval_timeout": state.config.security.approval_timeout,
-        "security_patterns_count": len(
-            state.config.security.patterns or default_patterns()
-        ),
+        "security_patterns_count": len(state.config.security.patterns or default_patterns()),
     }
 
 
@@ -106,7 +104,7 @@ def register(app) -> None:
         except Exception:
             screen_size = None
         return {
-            "version": "0.1.0",
+            "version": __version__,
             "model": state.config.agent.model,
             "base_url": state.config.agent.base_url or "（OpenAI 默认）",
             "vision": state.config.agent.vision,
@@ -137,9 +135,7 @@ def register(app) -> None:
             updates["agent"]["ocr"] = payload.ocr
         if payload.vision_whitelist is not None:
             updates["agent"]["vision_whitelist"] = [
-                item.strip()
-                for item in payload.vision_whitelist.split(",")
-                if item.strip()
+                item.strip() for item in payload.vision_whitelist.split(",") if item.strip()
             ]
         if payload.memory_enabled is not None:
             updates["agent"]["memory_enabled"] = payload.memory_enabled
@@ -152,9 +148,7 @@ def register(app) -> None:
         if payload.security_enabled is not None:
             updates["security"]["enabled"] = payload.security_enabled
         if payload.approval_timeout is not None:
-            updates["security"]["approval_timeout"] = max(
-                5.0, float(payload.approval_timeout)
-            )
+            updates["security"]["approval_timeout"] = max(5.0, float(payload.approval_timeout))
         if not updates["agent"] and not updates["security"]:
             raise HTTPException(status_code=400, detail="没有可更新的字段")
 
@@ -164,14 +158,12 @@ def register(app) -> None:
         return config_summary(state)
 
     @router.post("/api/transcribe", dependencies=[Depends(require_token)])
-    async def transcribe(request: Request, file: UploadFile = File(...)):
+    async def transcribe(request: Request, file: UploadFile = File(...)):  # noqa: B008
         state = request.app.state.geass
         if state.client is None:
             raise HTTPException(status_code=503, detail="未配置 API Key，无法转写")
         if not state.config.voice.fallback_model:
-            raise HTTPException(
-                status_code=503, detail="语音兜底转写已禁用（fallback_model 为空）"
-            )
+            raise HTTPException(status_code=503, detail="语音兜底转写已禁用（fallback_model 为空）")
 
         data = await file.read()
         if not data:
@@ -187,7 +179,7 @@ def register(app) -> None:
             )
             text = result.text
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"转写失败：{exc}")
+            raise HTTPException(status_code=502, detail=f"转写失败：{exc}") from exc
         return {"text": text}
 
     @router.post("/api/agent/stop", dependencies=[Depends(require_token)])
@@ -202,9 +194,7 @@ def register(app) -> None:
         state = request.app.state.geass
         if state.schedule_store is None:
             raise HTTPException(status_code=503, detail="定时系统不可用")
-        return {
-            "jobs": [job.to_dict() for job in state.schedule_store.list()]
-        }
+        return {"jobs": [job.to_dict() for job in state.schedule_store.list()]}
 
     @router.post("/api/schedule", dependencies=[Depends(require_token)])
     async def add_schedule(request: Request, payload: ScheduleAdd):
@@ -218,7 +208,7 @@ def register(app) -> None:
                 persistent=payload.persistent,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"job": job.to_dict()}
 
     @router.delete("/api/schedule/{job_id}", dependencies=[Depends(require_token)])
@@ -233,9 +223,7 @@ def register(app) -> None:
     @router.get("/api/resources", dependencies=[Depends(require_token)])
     async def resource_summary(request: Request):
         state = request.app.state.geass
-        memory_entries = (
-            state.memory.recall("", limit=50) if state.memory is not None else []
-        )
+        memory_entries = state.memory.recall("", limit=50) if state.memory is not None else []
         rag_sources = state.rag.list_sources() if state.rag is not None else []
         skills = [
             {
@@ -299,9 +287,7 @@ def register(app) -> None:
             raise HTTPException(status_code=503, detail="记忆未启用")
         return {"ok": True, "removed": state.memory.clear()}
 
-    @router.delete(
-        "/api/resources/memory/{key}", dependencies=[Depends(require_token)]
-    )
+    @router.delete("/api/resources/memory/{key}", dependencies=[Depends(require_token)])
     async def delete_memory(request: Request, key: str):
         state = request.app.state.geass
         if state.memory is None:
@@ -316,24 +302,16 @@ def register(app) -> None:
         if state.rag is None:
             raise HTTPException(status_code=503, detail="RAG 未启用")
         exts = (
-            [
-                item.strip()
-                for item in payload.extensions.split(",")
-                if item.strip()
-            ]
+            [item.strip() for item in payload.extensions.split(",") if item.strip()]
             if payload.extensions
             else None
         )
         try:
-            return state.rag.add_source(
-                payload.path, name=payload.name, exts=exts
-            )
+            return state.rag.add_source(payload.path, name=payload.name, exts=exts)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @router.delete(
-        "/api/resources/rag/{source}", dependencies=[Depends(require_token)]
-    )
+    @router.delete("/api/resources/rag/{source}", dependencies=[Depends(require_token)])
     async def remove_rag_source(request: Request, source: str):
         state = request.app.state.geass
         if state.rag is None or not state.rag.remove_source(source):
@@ -354,13 +332,9 @@ def register(app) -> None:
         "/api/resources/rag/{source}/enabled",
         dependencies=[Depends(require_token)],
     )
-    async def set_rag_enabled(
-        request: Request, source: str, payload: EnabledUpdate
-    ):
+    async def set_rag_enabled(request: Request, source: str, payload: EnabledUpdate):
         state = request.app.state.geass
-        if state.rag is None or not state.rag.set_enabled(
-            source, payload.enabled
-        ):
+        if state.rag is None or not state.rag.set_enabled(source, payload.enabled):
             raise HTTPException(status_code=404, detail="数据源不存在")
         return {"ok": True}
 
@@ -390,9 +364,7 @@ def register(app) -> None:
             ]
         }
 
-    @router.get(
-        "/api/resources/skills/{name}", dependencies=[Depends(require_token)]
-    )
+    @router.get("/api/resources/skills/{name}", dependencies=[Depends(require_token)])
     async def get_skill_resource(request: Request, name: str):
         state = request.app.state.geass
         skill = find_skill(state.agent.skills, name)
@@ -405,9 +377,7 @@ def register(app) -> None:
             "files": skill.files(),
         }
 
-    @router.delete(
-        "/api/resources/skills/{name}", dependencies=[Depends(require_token)]
-    )
+    @router.delete("/api/resources/skills/{name}", dependencies=[Depends(require_token)])
     async def delete_skill_resource(request: Request, name: str):
         state = request.app.state.geass
         skill = find_skill(state.agent.skills, name)
@@ -448,9 +418,7 @@ def register(app) -> None:
         state.pot.set_cot(payload.cot)
         return {"ok": True}
 
-    @router.delete(
-        "/api/resources/pot/rot/{name}", dependencies=[Depends(require_token)]
-    )
+    @router.delete("/api/resources/pot/rot/{name}", dependencies=[Depends(require_token)])
     async def delete_pot_rot(request: Request, name: str):
         state = request.app.state.geass
         if state.pot is None or not state.pot.delete_rot(name):
@@ -461,13 +429,9 @@ def register(app) -> None:
         "/api/resources/pot/rot/{name}/enabled",
         dependencies=[Depends(require_token)],
     )
-    async def set_pot_rot_enabled(
-        request: Request, name: str, payload: EnabledUpdate
-    ):
+    async def set_pot_rot_enabled(request: Request, name: str, payload: EnabledUpdate):
         state = request.app.state.geass
-        if state.pot is None or not state.pot.set_rot_enabled(
-            name, payload.enabled
-        ):
+        if state.pot is None or not state.pot.set_rot_enabled(name, payload.enabled):
             raise HTTPException(status_code=404, detail="ROT 不存在")
         return {"ok": True}
 
@@ -488,18 +452,14 @@ def register(app) -> None:
             raise HTTPException(status_code=400, detail=result.get("error"))
         return result
 
-    @router.post(
-        "/api/tasks/{task_id}/cancel", dependencies=[Depends(require_token)]
-    )
+    @router.post("/api/tasks/{task_id}/cancel", dependencies=[Depends(require_token)])
     async def cancel_background_task(request: Request, task_id: str):
         state = request.app.state.geass
         if state.task_manager is None or not state.task_manager.cancel(task_id):
             raise HTTPException(status_code=404, detail="后台任务不存在或已结束")
         return {"ok": True}
 
-    @router.delete(
-        "/api/tasks/{task_id}", dependencies=[Depends(require_token)]
-    )
+    @router.delete("/api/tasks/{task_id}", dependencies=[Depends(require_token)])
     async def remove_background_task(request: Request, task_id: str):
         state = request.app.state.geass
         if state.task_manager is None or not state.task_manager.remove(task_id):

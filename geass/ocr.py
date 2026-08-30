@@ -11,6 +11,7 @@ Token / 模型 / 端点与 LLM API Key 的配置方式一致：
 
 或使用环境变量 `GEASS_PADDLEOCR_TOKEN` 等；默认写入 `~/.geass/env.toml`。
 """
+
 from __future__ import annotations
 
 import io
@@ -123,28 +124,33 @@ class PaddleOCRBackend:
             "model": self.model,
             "optionalPayload": json.dumps(self.optional_payload),
         }
-        try:
-            response = requests.post(
-                self._jobs_url(),
-                headers=self._headers(),
-                data=data,
-                files={"file": ("screen.jpg", buffer, "image/jpeg")},
-                timeout=60,
-            )
-        except requests.RequestException as exc:
-            raise OCRRemoteError(f"提交 OCR 任务失败：{exc}") from exc
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                response = requests.post(
+                    self._jobs_url(),
+                    headers=self._headers(),
+                    data=data,
+                    files={"file": ("screen.jpg", buffer, "image/jpeg")},
+                    timeout=60,
+                )
+                break
+            except requests.RequestException as exc:
+                last_exc = exc
+                if attempt == 0:
+                    time.sleep(1.0)
+        else:
+            raise OCRRemoteError(f"提交 OCR 任务失败：{last_exc}") from last_exc
         try:
             payload = response.json()
             job_id = str(payload["data"]["jobId"]).strip()
         except (ValueError, KeyError, TypeError) as exc:
             raise OCRRemoteError(
-                f"提交 OCR 任务失败（HTTP {response.status_code}）："
-                f"{_short(response.text)}"
+                f"提交 OCR 任务失败（HTTP {response.status_code}）：{_short(response.text)}"
             ) from exc
         if response.status_code != 200 or not job_id:
             raise OCRRemoteError(
-                f"提交 OCR 任务失败（HTTP {response.status_code}）："
-                f"{_short(response.text)}"
+                f"提交 OCR 任务失败（HTTP {response.status_code}）：{_short(response.text)}"
             )
         return job_id
 
@@ -154,21 +160,15 @@ class PaddleOCRBackend:
         state = "unknown"
         while True:
             if time.monotonic() >= deadline:
-                raise OCRRemoteError(
-                    f"OCR 任务超时（>{self.timeout:.0f}s），最后状态：{state}"
-                )
+                raise OCRRemoteError(f"OCR 任务超时（>{self.timeout:.0f}s），最后状态：{state}")
             try:
-                response = requests.get(
-                    url, headers=self._headers(), timeout=30
-                )
+                response = requests.get(url, headers=self._headers(), timeout=30)
             except requests.RequestException as exc:
                 raise OCRRemoteError(f"查询 OCR 任务失败：{exc}") from exc
             payload = self._json_or_raise(response, "查询 OCR 任务")
             data = payload.get("data")
             if not isinstance(data, dict):
-                raise OCRRemoteError(
-                    f"查询 OCR 任务返回异常：{_short(response.text)}"
-                )
+                raise OCRRemoteError(f"查询 OCR 任务返回异常：{_short(response.text)}")
             state = str(data.get("state") or "unknown")
             if state == "done":
                 try:
@@ -176,26 +176,18 @@ class PaddleOCRBackend:
                 except (KeyError, TypeError) as exc:
                     raise OCRRemoteError("OCR 任务完成但缺少结果地址") from exc
             if state == "failed":
-                raise OCRRemoteError(
-                    f"OCR 任务失败：{data.get('errorMsg') or '未知原因'}"
-                )
-            time.sleep(
-                min(self.poll_interval, max(0.0, deadline - time.monotonic()))
-            )
+                raise OCRRemoteError(f"OCR 任务失败：{data.get('errorMsg') or '未知原因'}")
+            time.sleep(min(self.poll_interval, max(0.0, deadline - time.monotonic())))
 
     def _download(self, jsonl_url: str) -> list[dict[str, Any]]:
         # resultUrl.jsonUrl 是预签名下载地址：按官方示例直接 GET，不带
         # Authorization 头（带上反而可能被 CDN 拒绝，表现为 HTTP 400）。
         try:
-            response = requests.get(
-                jsonl_url, timeout=60
-            )
+            response = requests.get(jsonl_url, timeout=60)
         except requests.RequestException as exc:
             raise OCRRemoteError(f"下载 OCR 结果失败：{exc}") from exc
         if response.status_code != 200:
-            raise OCRRemoteError(
-                f"下载 OCR 结果失败（HTTP {response.status_code}）"
-            )
+            raise OCRRemoteError(f"下载 OCR 结果失败（HTTP {response.status_code}）")
         lines: list[dict[str, Any]] = []
         for line in response.text.strip().splitlines():
             line = line.strip()
@@ -217,19 +209,15 @@ class PaddleOCRBackend:
             payload = response.json()
         except ValueError as exc:
             raise OCRRemoteError(
-                f"{action}失败（HTTP {response.status_code}）："
-                f"{_short(response.text)}"
+                f"{action}失败（HTTP {response.status_code}）：{_short(response.text)}"
             ) from exc
         if not isinstance(payload, dict):
             raise OCRRemoteError(
-                f"{action}失败（HTTP {response.status_code}）："
-                f"{_short(response.text)}"
+                f"{action}失败（HTTP {response.status_code}）：{_short(response.text)}"
             )
         return payload
 
-    def _parse_response(
-        self, lines: list[dict[str, Any]], size: tuple[int, int]
-    ) -> list[OCRBox]:
+    def _parse_response(self, lines: list[dict[str, Any]], size: tuple[int, int]) -> list[OCRBox]:
         width, height = size
         boxes: list[OCRBox] = []
         for line in lines:
@@ -248,9 +236,7 @@ class PaddleOCRBackend:
                 boxes.append(OCRBox(text=text, confidence=1.0, x=0.5, y=0.5))
         return boxes
 
-    def _parse_page(
-        self, page: dict[str, Any], width: int, height: int
-    ) -> list[OCRBox]:
+    def _parse_page(self, page: dict[str, Any], width: int, height: int) -> list[OCRBox]:
         boxes: list[OCRBox] = []
         # PaddleOCR-VL-1.6：prunedResult.parsing_res_list
         #   {"block_label": "ocr", "block_content": "hello", "block_bbox": [...]}
@@ -258,32 +244,19 @@ class PaddleOCRBackend:
             for item in container["parsing_res_list"]:
                 if not isinstance(item, dict):
                     continue
-                text = (
-                    item.get("block_content")
-                    or item.get("content")
-                    or item.get("text")
-                    or ""
-                )
+                text = item.get("block_content") or item.get("content") or item.get("text") or ""
                 bbox = item.get("block_bbox") or item.get("bbox")
                 score = item.get("block_score", item.get("score", 1.0))
                 if text:
-                    boxes.append(
-                        self._make_box(str(text), score, bbox, width, height)
-                    )
+                    boxes.append(self._make_box(str(text), score, bbox, width, height))
         # PP-StructureV3：overall_ocr_res / ocr_res 等 rec_texts 结构
         for container in _find_containers(page, "rec_texts"):
             texts = container.get("rec_texts") or []
             scores = container.get("rec_scores") or []
-            polys = (
-                container.get("rec_boxes")
-                or container.get("rec_polys")
-                or []
-            )
+            polys = container.get("rec_boxes") or container.get("rec_polys") or []
             for text, score, poly in _zip_padded(texts, scores, polys):
                 if text:
-                    boxes.append(
-                        self._make_box(str(text), score, poly, width, height)
-                    )
+                    boxes.append(self._make_box(str(text), score, poly, width, height))
         return boxes
 
     def _make_box(
@@ -363,9 +336,7 @@ def _flatten_points(poly: Any) -> list[tuple[float, float]]:
     if not isinstance(poly, (list, tuple)):
         return []
     points: list[tuple[float, float]] = []
-    if len(poly) in (4, 8) and all(
-        isinstance(value, (int, float)) for value in poly
-    ):
+    if len(poly) in (4, 8) and all(isinstance(value, (int, float)) for value in poly):
         flat = [float(value) for value in poly]
         if len(poly) == 4:
             points.append((flat[0], flat[1]))

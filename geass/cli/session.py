@@ -1,10 +1,13 @@
 """CLI 会话：light / deliberate 双模式，复用 Geass 资产。"""
+
 from __future__ import annotations
 
 import json
 import subprocess
 from typing import Any
 
+from ..config import AgentConfig
+from ..safety import UNTRUSTED_BEGIN, UNTRUSTED_END
 from ..skills import catalog_text, find_skill
 from .tui import TUI
 
@@ -81,7 +84,7 @@ class CILSession:
     def __init__(
         self,
         client: Any,
-        config: Any,
+        config: AgentConfig,
         memory: Any = None,
         rag: Any = None,
         skills: list | None = None,
@@ -101,22 +104,20 @@ class CILSession:
     def _asset_context(self, question: str) -> str:
         parts: list[str] = []
         if self.pot is not None:
-            if getattr(self.config, "pot_inject_cot", True):
+            if self.config.pot_inject_cot:
                 cot = self.pot.get_cot()
                 if cot:
                     parts.append("## Global-COT\n" + cot)
-            hits = max(0, int(getattr(self.config, "pot_rot_hits", 2)))
-            if getattr(self.config, "pot_inject_rot", True) and hits > 0:
-                rots = []
+            hits = max(0, int(self.config.pot_rot_hits))
+            rots = []
+            if self.config.pot_inject_rot and hits > 0:
                 pinned = getattr(self, "_pinned_rot", None)
                 if pinned:
                     rot = self.pot.get_rot(pinned)
                     if rot is not None and rot.enabled:
                         rots.append(rot)
                 if len(rots) < hits:
-                    rots.extend(
-                        self.pot.select_rots(question, limit=hits - len(rots))
-                    )
+                    rots.extend(self.pot.select_rots(question, limit=hits - len(rots)))
                 for rot in rots:
                     parts.append(f"## ROT「{rot.name}」（{rot.role}）\n{rot.body}")
             self.tui.update_status(self.mode, [rot.name for rot in rots])
@@ -125,17 +126,21 @@ class CILSession:
         if self.memory is not None:
             context = self.memory.context_for(question, limit=6)
             if context:
-                parts.append("## 持久记忆\n" + context)
+                parts.append(
+                    "## 持久记忆\n" + UNTRUSTED_BEGIN + "\n" + context + "\n" + UNTRUSTED_END
+                )
         if self.rag is not None:
             try:
                 context = self.rag.context_for(
                     question,
-                    limit=getattr(self.config, "rag_inject_hits", 5),
-                    max_chars=getattr(self.config, "rag_inject_chars", 3000),
-                    min_score=getattr(self.config, "rag_inject_min_score", 0.25),
+                    limit=self.config.rag_inject_hits,
+                    max_chars=self.config.rag_inject_chars,
+                    min_score=self.config.rag_inject_min_score,
                 )
                 if context:
-                    parts.append("## RAG 参考\n" + context)
+                    parts.append(
+                        "## RAG 参考\n" + UNTRUSTED_BEGIN + "\n" + context + "\n" + UNTRUSTED_END
+                    )
             except Exception:
                 pass
         return "\n\n".join(parts)
@@ -169,14 +174,7 @@ class CILSession:
             *self.history[-12:],
             {"role": "user", "content": text},
         ]
-        tools = (
-            [
-                {"type": "function", "function": tool}
-                for tool in CIL_TOOLS
-            ]
-            if tool_use
-            else None
-        )
+        tools = [{"type": "function", "function": tool} for tool in CIL_TOOLS] if tool_use else None
         answer = ""
         for _ in range(8):
             response = await self.client.chat.completions.create(
@@ -246,8 +244,7 @@ class CILSession:
             return {
                 "ok": True,
                 "skills": [
-                    {"name": skill.name, "description": skill.description}
-                    for skill in self.skills
+                    {"name": skill.name, "description": skill.description} for skill in self.skills
                 ],
             }
         if name == "read_skill":
@@ -282,18 +279,16 @@ class CILSession:
     async def _deliberate(self, question: str) -> str:
         rots = []
         if self.pot is not None:
-            rots = self.pot.select_rots(
-                question, limit=max(1, int(getattr(self.config, "cli_subagents", 3)))
-            )
+            rots = self.pot.select_rots(question, limit=max(1, int(self.config.cli_subagents)))
             if not rots:
                 rots = self.pot.list_rots(include_disabled=False)[
-                    : max(1, int(getattr(self.config, "cli_subagents", 3)))
+                    : max(1, int(self.config.cli_subagents))
                 ]
         if not rots:
             self.tui.say("CIL", "没有可用 ROT，使用默认视角分析。")
             rots = [type("ROT", (), {"name": "general", "role": "通用分析者", "body": ""})()]
 
-        rounds = max(1, int(getattr(self.config, "cli_rounds", 3)))
+        rounds = max(1, int(self.config.cli_rounds))
         transcript: list[str] = []
         self.tui.say("CIL", f"进入思辨：{len(rots)} 个角色 × {rounds} 轮")
         for round_index in range(1, rounds + 1):
@@ -302,9 +297,7 @@ class CILSession:
                 messages = [
                     {
                         "role": "system",
-                        "content": (
-                            f"你是角色「{rot.name}」：{rot.role}\n{rot.body}"
-                        ),
+                        "content": (f"你是角色「{rot.name}」：{rot.role}\n{rot.body}"),
                     },
                     {
                         "role": "user",

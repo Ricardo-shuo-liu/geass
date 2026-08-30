@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 
 from geass.cli.session import CILSession
 from geass.cli.tui import TUI
@@ -19,9 +22,7 @@ def make_config() -> AgentConfig:
 
 
 def test_cil_light_chat(tmp_path):
-    client = FakeOpenAI(
-        [FakeResponse(message=FakeMessage(content="你好，有什么可以帮你？"))]
-    )
+    client = FakeOpenAI([FakeResponse(message=FakeMessage(content="你好，有什么可以帮你？"))])
     tui = TUI()
     session = CILSession(
         client=client,
@@ -77,9 +78,7 @@ def test_cil_deliberate_slash_switches_mode(tmp_path):
 
 
 def test_cil_chat_tools_use_nested_function_schema(tmp_path):
-    client = FakeOpenAI(
-        [FakeResponse(message=FakeMessage(content="完成"))]
-    )
+    client = FakeOpenAI([FakeResponse(message=FakeMessage(content="完成"))])
     session = CILSession(
         client=client,
         config=make_config(),
@@ -108,3 +107,37 @@ def test_cil_quit_words_exit_session(tmp_path):
     asyncio.run(session.run())
 
     assert session.tui.messages[-1][1] == "再见。"
+
+
+def test_cil_honors_agent_pot_toggles(tmp_path):
+    pot = POTStore(tmp_path / ".pot")
+    pot.set_cot("通用思维：先验证再执行。")
+    pot.save_rot("安全视角", "关注安全", "安全工程师", "检查风险")
+
+    config = make_config()
+    config.pot_inject_cot = False
+    config.pot_inject_rot = False
+    session = CILSession(
+        client=FakeOpenAI([]),
+        config=config,
+        pot=pot,
+        tui=TUI(),
+    )
+
+    context = session._asset_context("测试")
+
+    assert "Global-COT" not in context
+    assert "ROT" not in context
+
+
+def test_cil_fails_loudly_when_given_non_agent_config(tmp_path):
+    pot = POTStore(tmp_path / ".pot")
+    session = CILSession(
+        client=FakeOpenAI([]),
+        config=SimpleNamespace(),  # type: ignore[arg-type]
+        pot=pot,
+        tui=TUI(),
+    )
+
+    with pytest.raises(AttributeError):
+        session._asset_context("测试")

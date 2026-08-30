@@ -4,6 +4,7 @@
 ``/ws/control``，服务端立刻换算成真实像素并执行，用于打断 Agent 后的
 直接接管，或用户全程手动操作。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -37,9 +38,7 @@ def _button(value: Any) -> str:
     return button
 
 
-def execute_manual_input(
-    backend: InputBackend, payload: dict[str, Any]
-) -> dict[str, Any]:
+def execute_manual_input(backend: InputBackend, payload: dict[str, Any]) -> dict[str, Any]:
     """执行单条手动输入事件，返回 ``{ok, message}`` 或 ``{ok, error}``。"""
     action = str(payload.get("action") or "").strip().lower()
     try:

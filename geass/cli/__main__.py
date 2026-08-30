@@ -1,4 +1,5 @@
 """``python -m geass.cli``：启动 CLI 终端助手。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -40,11 +41,8 @@ def main() -> None:
         if config.agent.rag_enabled
         else None
     )
-    pot = (
-        POTStore(config.agent.pot_path or None)
-        if config.agent.pot_enabled
-        else None
-    )
+    pot = POTStore(config.agent.pot_path or None) if config.agent.pot_enabled else None
+
     def make_session() -> CILSession:
         return CILSession(
             client=client,

@@ -4,6 +4,7 @@
 开始时判断简单/困难，困难任务调用 ``plan`` 工具记录目标与步骤；执行
 循环随后把计划作为上下文持续注入，帮助模型保持主线并逐步验证。
 """
+
 # 包化后的对外入口：保持 from geass.tasks import TaskPlan 兼容。
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ class TaskPlan:
     updated_at: float = field(default_factory=time.time)
 
     @classmethod
-    def from_args(cls, args: dict[str, Any]) -> "TaskPlan":
+    def from_args(cls, args: dict[str, Any]) -> TaskPlan:
         difficulty = str(args.get("difficulty") or "").strip().lower()
         if difficulty not in VALID_DIFFICULTY:
             raise ValueError(f"difficulty 必须是 {VALID_DIFFICULTY} 之一")
@@ -52,9 +53,7 @@ class TaskPlan:
         except (TypeError, ValueError) as exc:
             raise ValueError("current_step 必须是整数") from exc
         if not 1 <= current_step <= len(steps) + 1:
-            raise ValueError(
-                f"current_step 应在 1~{len(steps) + 1} 之间"
-            )
+            raise ValueError(f"current_step 应在 1~{len(steps) + 1} 之间")
 
         return cls(
             difficulty=difficulty,

@@ -14,7 +14,7 @@
 | `security.enabled` | `true` | 高危 shell 命令人工审核开关 |
 | `security.approval_timeout` | `30` | 审核等待手机端回应的秒数，超时自动拒绝（最低 5 秒） |
 | `security.patterns` | 空 | 自定义黑名单正则数组；留空用内置默认，填写后整体替换默认 |
-| `agent.model` | `gpt-5.6-terra` | Agent 视觉模型（可换 `sol`/`luna`） |
+| `agent.model` | `deepseek-v4-flash` | Agent 模型（任意 OpenAI 兼容模型名） |
 | `agent.base_url` | 空 | OpenAI 兼容端点；DeepSeek 填 `https://api.deepseek.com` |
 | `agent.vision` | `true` | 模型是否支持图像输入；不支持视觉的模型（如 `deepseek-v4-flash`）置 `false`，否则会自动降级为纯文本模式 |
 | `agent.vision_whitelist` | 空 | 支持图像输入的模型白名单（逗号分隔）；填写后以白名单为准：模型在名单内直接发截图，不在名单内自动与 PaddleOCR 配对 |
@@ -24,6 +24,11 @@
 | `agent.ocr_base_url` | `https://paddleocr.aistudio-app.com` | OCR jobs API 端点 |
 | `agent.ocr_timeout` | `90` | 单个识别任务（提交 + 轮询）的最长等待秒数 |
 | `agent.terminal_timeout` | `15` | `open_terminal` 等待命令输出的秒数 |
+| `agent.model_max_retries` | `3` | 单次模型调用对可重试错误的重试次数 |
+| `agent.model_retry_base_delay` | `2.0` | 重试退避基础延时（秒，逐次 ×2 且单次封顶 60 秒） |
+| `agent.model_fail_limit` | `3` | 连续失败步数上限；达到前会把错误回填给模型换方法，达到后终止任务 |
+| `agent.ocr_retry_base_delay` | `5.0` | OCR 探测失败后的基础冷却秒数（逐次 ×2） |
+| `agent.ocr_retry_max_delay` | `120.0` | OCR 探测冷却上限秒数 |
 | `agent.skills_dir` | `skills` | 种子 SKILL 目录（相对项目根目录），同步到 `~/.geass/.skill/.system/` |
 | `agent.skill_root` | 空 | 运行时 SKILL 根目录；留空用 `~/.geass/.skill` |
 | `agent.schedule_path` | 空 | 定时任务目录；留空用 `~/.geass/.schedule` |
@@ -81,5 +86,5 @@
 配置按优先级合并：**环境变量 > `~/.geass/env.toml` > `config.toml` > 默认值**。
 
 - 启动时用过的 `GEASS_*` 环境变量会自动存入 `~/.geass/env.toml`（文件权限 0600），无需每次配置；
-- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；视觉白名单：`--vision-whitelist gpt-5.6-terra,sol`；记忆：`--memory-enabled false` / `--memory-path ...`；技能与进化：`--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
+- 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；视觉白名单：`--vision-whitelist gpt-4o,deepseek-v4-flash`；记忆：`--memory-enabled false` / `--memory-path ...`；技能与进化：`--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
 - 运行时接口：`GET /api/config`（脱敏查看）、`POST /api/config`（JSON 更新，如 `{"model":"...","base_url":"...","api_key":"...","vision":false}`），更新后立即生效并持久化。

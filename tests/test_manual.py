@@ -13,9 +13,7 @@ from .ws_harness import WSClient
 def test_move_normalizes_coordinates():
     backend = FakeBackend(size=(1000, 500))
 
-    result = execute_manual_input(
-        backend, {"action": "move", "x": 0.25, "y": 0.5}
-    )
+    result = execute_manual_input(backend, {"action": "move", "x": 0.25, "y": 0.5})
 
     assert result["ok"] is True
     assert ("move", (250, 250), {}) in backend.calls
@@ -24,9 +22,7 @@ def test_move_normalizes_coordinates():
 def test_click_passes_button_and_coordinates():
     backend = FakeBackend(size=(1000, 500))
 
-    execute_manual_input(
-        backend, {"action": "click", "x": 0.1, "y": 0.2, "button": "right"}
-    )
+    execute_manual_input(backend, {"action": "click", "x": 0.1, "y": 0.2, "button": "right"})
 
     assert ("click", (100, 100, "right"), {}) in backend.calls
 
@@ -71,9 +67,9 @@ def test_invalid_action_and_button_return_errors():
 
     assert execute_manual_input(backend, {"action": "nope"})["ok"] is False
     assert (
-        execute_manual_input(
-            backend, {"action": "click", "x": 0.5, "y": 0.5, "button": "bad"}
-        )["ok"]
+        execute_manual_input(backend, {"action": "click", "x": 0.5, "y": 0.5, "button": "bad"})[
+            "ok"
+        ]
         is False
     )
 
@@ -83,9 +79,7 @@ def test_manual_input_ws_drives_backend():
         config = make_config()
         config.server.token = "test-token"
         state = make_state(config=config)
-        state.approval_manager.broadcast = lambda message: broadcast_control(
-            state, message
-        )
+        state.approval_manager.broadcast = lambda message: broadcast_control(state, message)
         app = create_app(state)
         headers = [(b"sec-websocket-protocol", b"geass, test-token")]
 
@@ -98,9 +92,7 @@ def test_manual_input_ws_drives_backend():
                     "y": 0.5,
                 }
             )
-            await ws.send_json(
-                {"type": "manual_input", "action": "type", "text": "hi"}
-            )
+            await ws.send_json({"type": "manual_input", "action": "type", "text": "hi"})
             await asyncio.sleep(0.01)
 
         assert ("click", (960, 540, "left"), {}) in state.backend.calls

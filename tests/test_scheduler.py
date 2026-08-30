@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from geass.scheduler import ScheduleStore, Scheduler
+from geass.scheduler import Scheduler, ScheduleStore
 
 
 def test_store_add_list_remove_and_persist(tmp_path):

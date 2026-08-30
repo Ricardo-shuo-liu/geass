@@ -21,7 +21,7 @@ def write_skill(root, name: str = "echo-hello") -> None:
     (skill_dir / "SKILL.md").write_text(
         "---\n"
         f"name: {name}\n"
-        'description: 在可见终端中输出 hello world\n'
+        "description: 在可见终端中输出 hello world\n"
         "---\n\n"
         "# 步骤\n\n"
         '调用 `open_terminal` 执行 `echo "hello world"`。\n',
@@ -82,9 +82,7 @@ def test_agent_skill_tools_expose_catalog_and_body(tmp_path):
     assert missing["ok"] is False
 
 
-def test_load_skills_reads_system_and_evolved_with_override(
-    tmp_path, monkeypatch
-):
+def test_load_skills_reads_system_and_evolved_with_override(tmp_path, monkeypatch):
     monkeypatch.setenv("GEASS_HOME", str(tmp_path / "home"))
     root = resolve_skill_root(None)
     system = root / ".system"

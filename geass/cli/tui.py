@@ -1,7 +1,6 @@
 """CLI 终端界面：优先 Rich 面板，缺失时回退 ANSI 简易 REPL。"""
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 try:
     from rich.console import Console
@@ -44,11 +43,7 @@ class TUI:
             import readline
 
             def completer(text: str, state: int):
-                candidates = [
-                    command
-                    for command in SLASH_COMMANDS
-                    if command.startswith(text)
-                ]
+                candidates = [command for command in SLASH_COMMANDS if command.startswith(text)]
                 return candidates[state] if state < len(candidates) else None
 
             readline.set_completer(completer)
@@ -66,9 +61,7 @@ class TUI:
 
     def render_header(self) -> None:
         if self._console is not None:
-            self._console.print(
-                Panel(self._status_text(), title="Geass CIL", border_style="cyan")
-            )
+            self._console.print(Panel(self._status_text(), title="Geass CIL", border_style="cyan"))
         else:
             print(f"[CIL] {self._status_text()}")
 
@@ -96,9 +89,7 @@ class TUI:
     def clear(self) -> None:
         self.messages.clear()
 
-    def update_status(
-        self, mode: str, rot_names: list[str] | None = None, model: str = ""
-    ) -> None:
+    def update_status(self, mode: str, rot_names: list[str] | None = None, model: str = "") -> None:
         self.mode = mode
         if rot_names is not None:
             self.rot_names = rot_names

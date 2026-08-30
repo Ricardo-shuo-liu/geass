@@ -28,4 +28,3 @@ def test_norm_clamped():
 def test_norm_independent_of_capture_scale():
     agent = build_agent(FakeBackend(size=(3840, 2160)))
     assert agent.norm_to_px(0.25, 0.25) == (960, 540)
-

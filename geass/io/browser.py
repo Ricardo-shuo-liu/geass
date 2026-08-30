@@ -5,6 +5,7 @@
 自带参数，macOS 用 ``open``，Windows 用 ``start``。启动是异步的，调用
 方拿到成功后仍需等待并截图验证页面是否加载。
 """
+
 from __future__ import annotations
 
 import os
@@ -86,10 +87,7 @@ def _installed_browsers() -> list[str]:
 
 def _open_linux(action: str, url: str) -> dict[str, Any]:
     if not _display_ready():
-        raise BrowserError(
-            "当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），"
-            "无法打开浏览器"
-        )
+        raise BrowserError("当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），无法打开浏览器")
 
     if action == "open":
         argv = ["xdg-open", _page_arg(url)]

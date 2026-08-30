@@ -38,9 +38,7 @@ def test_rag_tools_via_agent(tmp_path):
     listed = asyncio.run(agent._execute("rag_list", {}))
     assert listed["count"] >= 2
 
-    searched = asyncio.run(
-        agent._execute("rag_search", {"query": "打开终端", "limit": 2})
-    )
+    searched = asyncio.run(agent._execute("rag_search", {"query": "打开终端", "limit": 2}))
     assert searched["found"] is True
     assert searched["matches"][0]["text"] == "打开终端的方法：按 ctrl+alt+t，然后输入命令。"
 

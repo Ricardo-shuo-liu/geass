@@ -5,13 +5,15 @@
 然后等待任意一个客户端回 `approval` 消息，超时自动拒绝。先到的决定生效，
 拒绝/超时/任务停止统一广播 `approval_resolved`，让其他客户端关掉弹窗。
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +76,7 @@ class ApprovalManager:
             }
         )
         try:
-            approved = await asyncio.wait_for(
-                asyncio.shield(future), timeout=expires_in
-            )
+            approved = await asyncio.wait_for(asyncio.shield(future), timeout=expires_in)
         except asyncio.TimeoutError:
             self._pending.pop(approval_id, None)
             await self._broadcast(

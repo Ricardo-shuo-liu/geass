@@ -1,12 +1,13 @@
 """``python -m geass.rag`` 命令行：管理 RAG 数据源。"""
+
 from __future__ import annotations
 
 import argparse
 import sys
 
 from ..config import load_config
-from .embeddings import provider_from_config
 from . import RAGManager
+from .embeddings import provider_from_config
 
 
 def _manager() -> RAGManager:
@@ -53,15 +54,11 @@ def main() -> None:
     manager = _manager()
 
     if args.command == "add":
-        exts = (
-            [item.strip() for item in args.ext.split(",") if item.strip()]
-            if args.ext
-            else None
-        )
+        exts = [item.strip() for item in args.ext.split(",") if item.strip()] if args.ext else None
         try:
             result = manager.add_source(args.path, name=args.name, exts=exts)
         except ValueError as exc:
-            raise SystemExit(str(exc))
+            raise SystemExit(str(exc)) from exc
         print(result["message"])
         return
 
@@ -129,4 +126,4 @@ if __name__ == "__main__":
         raise
     except Exception as exc:
         print(f"RAG 命令失败：{exc}", file=sys.stderr)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

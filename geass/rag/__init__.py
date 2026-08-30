@@ -1,4 +1,5 @@
 """RAG 数据源接入与检索增强。"""
+
 from __future__ import annotations
 
 import os
@@ -50,9 +51,7 @@ class RAGManager:
         changed = False
         for meta in self._sources.values():
             if meta.mode == "vector" and (
-                not ok
-                or self.provider is None
-                or meta.embedding_model != self.provider.model
+                not ok or self.provider is None or meta.embedding_model != self.provider.model
             ):
                 meta.needs_reindex = True
                 changed = True
@@ -94,10 +93,7 @@ class RAGManager:
                 "embedding_model": meta.embedding_model,
                 "embedding_dim": meta.embedding_dim,
                 "files": len(meta.files),
-                "chunks": sum(
-                    int(entry.get("chunks") or 0)
-                    for entry in meta.files.values()
-                ),
+                "chunks": sum(int(entry.get("chunks") or 0) for entry in meta.files.values()),
             }
             for meta in sorted(sources, key=lambda item: item.name)
         ]
@@ -120,8 +116,7 @@ class RAGManager:
         elif source_path.is_dir():
             root = source_path
             rel_files = sorted(
-                item.relative_to(root).as_posix()
-                for item in iter_source_files(root, exts)
+                item.relative_to(root).as_posix() for item in iter_source_files(root, exts)
             )
             default_name = root.name
         else:
@@ -129,11 +124,7 @@ class RAGManager:
 
         with self._lock:
             existing = next(
-                (
-                    meta
-                    for meta in self._sources.values()
-                    if Path(meta.root).resolve() == root
-                ),
+                (meta for meta in self._sources.values() if Path(meta.root).resolve() == root),
                 None,
             )
             if existing is not None:
@@ -160,9 +151,7 @@ class RAGManager:
             meta.exts = exts
             meta.updated_at = time.time()
             meta.mode = "vector" if vector_mode else "lexical"
-            meta.embedding_model = (
-                self.provider.model if vector_mode and self.provider else ""
-            )
+            meta.embedding_model = self.provider.model if vector_mode and self.provider else ""
             meta.embedding_dim = dim if vector_mode else 0
             meta.needs_reindex = False
 
@@ -177,13 +166,12 @@ class RAGManager:
                 except OSError:
                     continue
                 previous = old_files.get(rel)
-                keep = (
+                if (
                     previous is not None
                     and int(previous.get("size") or 0) == stat.st_size
                     and float(previous.get("mtime") or 0) == stat.st_mtime
                     and meta.mode == previous.get("mode", meta.mode)
-                )
-                if keep:
+                ):
                     new_files[rel] = {
                         "size": stat.st_size,
                         "mtime": stat.st_mtime,
@@ -200,10 +188,7 @@ class RAGManager:
                     for index, text in enumerate(chunks_text)
                 ]
                 if vector_mode:
-                    pending_embed.extend(
-                        (rel, chunk["index"], chunk["text"])
-                        for chunk in chunks
-                    )
+                    pending_embed.extend((rel, chunk["index"], chunk["text"]) for chunk in chunks)
                 new_files[rel] = {
                     "size": stat.st_size,
                     "mtime": stat.st_mtime,
@@ -213,19 +198,19 @@ class RAGManager:
                 self.store.save_chunks(meta, rel, chunks)
 
             if vector_mode and pending_embed:
+                if self.provider is None:
+                    return {"ok": False, "error": "嵌入端点不可用"}
                 texts = [item[2] for item in pending_embed]
                 vectors = self.provider.embed_texts(texts)
                 by_rel: dict[str, dict[int, list[float]]] = {}
-                for (rel, chunk_index, _text), vector in zip(
-                    pending_embed, vectors
-                ):
+                for (rel, chunk_index, _text), vector in zip(pending_embed, vectors, strict=False):
                     by_rel.setdefault(rel, {})[chunk_index] = vector
                 for rel, mapping in by_rel.items():
                     chunks = self.store.load_chunks(meta, rel)
                     for chunk in chunks:
-                        vector = mapping.get(chunk.get("index"))
-                        if vector is not None:
-                            chunk["embedding"] = vector
+                        embedding = mapping.get(int(chunk.get("index") or 0))
+                        if embedding is not None:
+                            chunk["embedding"] = embedding
                     self.store.save_chunks(meta, rel, chunks)
 
             for rel in list(old_files):
@@ -244,12 +229,9 @@ class RAGManager:
             "name": meta.name,
             "mode": meta.mode,
             "files": len(meta.files),
-            "chunks": sum(
-                int(entry.get("chunks") or 0) for entry in meta.files.values()
-            ),
+            "chunks": sum(int(entry.get("chunks") or 0) for entry in meta.files.values()),
             "message": (
-                f"已锁定数据源「{meta.name}」"
-                f"（{meta.mode}模式，{len(meta.files)} 个文件）"
+                f"已锁定数据源「{meta.name}」（{meta.mode}模式，{len(meta.files)} 个文件）"
             ),
         }
 
@@ -310,9 +292,7 @@ class RAGManager:
             ok, dim = self._probe_embedding()
             vector_mode = bool(ok and dim)
             meta.mode = "vector" if vector_mode else "lexical"
-            meta.embedding_model = (
-                self.provider.model if vector_mode and self.provider else ""
-            )
+            meta.embedding_model = self.provider.model if vector_mode and self.provider else ""
             meta.embedding_dim = dim if vector_mode else 0
             meta.needs_reindex = False
 
@@ -328,6 +308,8 @@ class RAGManager:
                 self.store.save_chunks(meta, rel, chunks)
 
             if vector_mode:
+                if self.provider is None:
+                    return {"ok": False, "error": "嵌入端点不可用"}
                 for rel, texts in texts_by_rel.items():
                     if not texts:
                         continue
@@ -396,12 +378,12 @@ class RAGManager:
             if not chunks:
                 continue
             if meta.mode == "vector" and ok and not meta.needs_reindex:
+                if self.provider is None:
+                    continue
                 try:
                     vector = self.provider.embed_texts([query])[0]
                     index = VectorIndex()
-                    index.add(
-                        [chunk["embedding"] for chunk in chunks if chunk.get("embedding")]
-                    )
+                    index.add([chunk["embedding"] for chunk in chunks if chunk.get("embedding")])
                     vectors_map = [
                         (position, chunk)
                         for position, chunk in enumerate(chunks)
@@ -421,9 +403,7 @@ class RAGManager:
                     # 查询时嵌入失败：本次调用退回词法
                     pass
             documents = [chunk["text"] for chunk in chunks]
-            for position, score in search_lexical(
-                query, documents, limit=limit
-            ):
+            for position, score in search_lexical(query, documents, limit=limit):
                 hits.append({**chunks[position], "score": score, "mode": "lexical"})
 
         hits.sort(key=lambda item: item["score"], reverse=True)

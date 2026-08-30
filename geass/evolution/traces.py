@@ -1,4 +1,5 @@
 """POT 反思所需的交流痕迹保留（jsonl 追加/裁剪/读取）。"""
+
 from __future__ import annotations
 
 import json
@@ -29,9 +30,7 @@ def trim_traces(path: Path, limit: int) -> None:
     if len(lines) <= limit:
         return
     try:
-        path.write_text(
-            "\n".join(lines[-limit:]) + "\n", encoding="utf-8"
-        )
+        path.write_text("\n".join(lines[-limit:]) + "\n", encoding="utf-8")
     except OSError:
         logger.warning("POT trace 裁剪失败", exc_info=True)
 

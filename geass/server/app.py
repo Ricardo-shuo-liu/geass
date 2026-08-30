@@ -1,4 +1,5 @@
 """FastAPI 应用组装。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .. import __version__
 from . import api, ws
 from .state import AppState
 
@@ -20,14 +22,10 @@ def create_app(state: AppState) -> FastAPI:
     async def lifespan(_: FastAPI):
         streamer_task = asyncio.create_task(state.streamer.run())
         evolution_task = (
-            asyncio.create_task(state.evolution.run())
-            if state.evolution is not None
-            else None
+            asyncio.create_task(state.evolution.run()) if state.evolution is not None else None
         )
         scheduler_task = (
-            asyncio.create_task(state.scheduler.run())
-            if state.scheduler is not None
-            else None
+            asyncio.create_task(state.scheduler.run()) if state.scheduler is not None else None
         )
         try:
             yield
@@ -54,7 +52,7 @@ def create_app(state: AppState) -> FastAPI:
             except Exception:
                 pass
 
-    app = FastAPI(title="Geass", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Geass", version=__version__, lifespan=lifespan)
     app.state.geass = state
 
     api.register(app)
@@ -70,11 +68,7 @@ def create_app(state: AppState) -> FastAPI:
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa(full_path: str):
             candidate = (DIST_DIR / full_path).resolve()
-            if (
-                full_path
-                and candidate.is_file()
-                and candidate.is_relative_to(dist_root)
-            ):
+            if full_path and candidate.is_file() and candidate.is_relative_to(dist_root):
                 return FileResponse(candidate)
             return FileResponse(DIST_DIR / "index.html")
 

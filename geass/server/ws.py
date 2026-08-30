@@ -1,4 +1,5 @@
 """WebSocket：屏幕帧流与命令通道。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,10 +7,10 @@ import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+from ..skills import load_skills, sync_system_skills
 from .auth import ws_auth
 from .manual import execute_manual_input
 from .state import AppState, broadcast_control
-from ..skills import load_skills, sync_system_skills
 
 
 def register(app) -> None:
@@ -119,11 +120,7 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
             )
     elif mtype == "manual_input":
         # 用户开始手动直控时接管：若 Agent 仍在运行则请求它退出。
-        if (
-            state.agent_task
-            and not state.agent_task.done()
-            and state.cancel_event is not None
-        ):
+        if state.agent_task and not state.agent_task.done() and state.cancel_event is not None:
             state.cancel_event.set()
             await broadcast_control(
                 state,
@@ -141,14 +138,12 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
         except Exception as exc:
             result = {"ok": False, "error": f"手动输入执行失败：{exc}"}
         if not result.get("ok"):
-            await ws.send_json(
-                {"type": "error", "message": result.get("error", "手动输入失败")}
-            )
+            await ws.send_json({"type": "error", "message": result.get("error", "手动输入失败")})
     else:
         await ws.send_json({"type": "error", "message": f"未知消息类型：{mtype}"})
 
 
-async def start_agent(state: AppState, text: str) -> None:
+async def start_agent(state: AppState, text: str) -> asyncio.Task[dict] | None:
     if state.agent_task and not state.agent_task.done():
         await broadcast_control(
             state,
@@ -160,7 +155,7 @@ async def start_agent(state: AppState, text: str) -> None:
                 "message": "已有任务正在执行，可先发送 stop 中断",
             },
         )
-        return
+        return None
 
     state.last_activity = time.time()
     # 上一个任务若残留未处理的审核请求，先全部拒绝，避免悬挂。
@@ -183,10 +178,7 @@ async def start_agent(state: AppState, text: str) -> None:
             result = {"state": "error", "message": str(exc)}
         await broadcast_control(state, {"type": "agent_result", **result})
         state.last_activity = time.time()
-        if (
-            state.evolution is not None
-            and state.agent.last_trace is not None
-        ):
+        if state.evolution is not None and state.agent.last_trace is not None:
             state.evolution.record_trace(state.agent.last_trace)
         return result
 

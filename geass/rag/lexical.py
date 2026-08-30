@@ -1,4 +1,5 @@
 """本地词法检索：BM25 风格打分 + 中文 n-gram。"""
+
 from __future__ import annotations
 
 import math
@@ -34,12 +35,8 @@ class LexicalIndex:
     def __init__(self, documents: list[str]) -> None:
         self.documents = documents
         self.lengths = [len(tokenize_terms(doc)) for doc in documents]
-        self.avg_len = (
-            sum(self.lengths) / len(self.lengths) if self.lengths else 0.0
-        )
-        self.term_freqs: list[Counter] = [
-            term_counts(doc) for doc in documents
-        ]
+        self.avg_len = sum(self.lengths) / len(self.lengths) if self.lengths else 0.0
+        self.term_freqs: list[Counter] = [term_counts(doc) for doc in documents]
         doc_count = len(documents)
         self.idf: dict[str, float] = {}
         if doc_count:
@@ -47,9 +44,7 @@ class LexicalIndex:
             for freqs in self.term_freqs:
                 df.update(freqs.keys())
             for term, freq in df.items():
-                self.idf[term] = math.log(
-                    1 + (doc_count - freq + 0.5) / (freq + 0.5)
-                )
+                self.idf[term] = math.log(1 + (doc_count - freq + 0.5) / (freq + 0.5))
 
     def score(self, query: str) -> list[float]:
         query_terms = set(tokenize_terms(query))
@@ -61,9 +56,7 @@ class LexicalIndex:
                 tf = freqs.get(term, 0)
                 if not tf:
                     continue
-                denom = tf + self.K1 * (
-                    1 - self.B + self.B * length / (self.avg_len or 1)
-                )
+                denom = tf + self.K1 * (1 - self.B + self.B * length / (self.avg_len or 1))
                 score += self.idf.get(term, 0.0) * tf / denom
             scores.append(score)
         return scores

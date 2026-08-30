@@ -37,9 +37,7 @@ def test_resources_summary_and_actions(tmp_path):
         state, app = build_state_and_app(tmp_path)
         transport = httpx.ASGITransport(app=app)
         headers = {"X-GEASS-Token": "test-token"}
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             summary = await client.get("/api/resources", headers=headers)
             assert summary.status_code == 200
             body = summary.json()
@@ -47,9 +45,7 @@ def test_resources_summary_and_actions(tmp_path):
             assert body["rag"]["sources"][0]["name"] == "docs"
             assert body["pot"]["rots"][0]["name"] == "工程师视角"
 
-            deleted = await client.delete(
-                "/api/resources/memory/browser", headers=headers
-            )
+            deleted = await client.delete("/api/resources/memory/browser", headers=headers)
             assert deleted.status_code == 200
             assert state.memory.recall("browser") == []
 
@@ -69,9 +65,7 @@ def test_resources_summary_and_actions(tmp_path):
             assert rot_disabled.status_code == 200
             assert state.pot.get_rot("工程师视角").enabled is False
 
-            removed = await client.delete(
-                "/api/resources/rag/docs", headers=headers
-            )
+            removed = await client.delete("/api/resources/rag/docs", headers=headers)
             assert removed.status_code == 200
             assert state.rag.list_sources() == []
 
@@ -101,12 +95,8 @@ def test_background_tasks_api(tmp_path):
         )
         transport = httpx.ASGITransport(app=app)
         headers = {"X-GEASS-Token": "test-token"}
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
-            created = await client.post(
-                "/api/tasks", json={"command": "后台命令"}, headers=headers
-            )
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            created = await client.post("/api/tasks", json={"command": "后台命令"}, headers=headers)
             assert created.status_code == 200
             task_id = created.json()["task_id"]
 
@@ -116,9 +106,7 @@ def test_background_tasks_api(tmp_path):
             summary = await client.get("/api/resources", headers=headers)
             assert summary.json()["background"]["tasks"][0]["id"] == task_id
 
-            cancelled = await client.post(
-                f"/api/tasks/{task_id}/cancel", headers=headers
-            )
+            cancelled = await client.post(f"/api/tasks/{task_id}/cancel", headers=headers)
             assert cancelled.status_code == 200
 
     asyncio.run(run())

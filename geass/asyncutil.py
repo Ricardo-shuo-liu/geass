@@ -1,9 +1,11 @@
 """不依赖默认线程池的阻塞任务桥接。"""
+
 from __future__ import annotations
 
 import asyncio
 import threading
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 _POLL_INTERVAL = 0.05
 
@@ -33,9 +35,7 @@ def run_in_thread(func: Callable[..., Any], *args: Any) -> Awaitable[Any]:
             except RuntimeError:
                 pass
 
-    thread = threading.Thread(
-        target=_runner, name="geass-blocking", daemon=True
-    )
+    thread = threading.Thread(target=_runner, name="geass-blocking", daemon=True)
     thread.start()
 
     def _watchdog() -> None:

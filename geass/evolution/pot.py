@@ -4,6 +4,7 @@
 - ROT：按某个角色视角形成的思考方式，类似 SKILL，按需选择 1~2 个注入；
 - trace：保留交流痕迹，供空闲反思使用。
 """
+
 from __future__ import annotations
 
 import os
@@ -163,9 +164,7 @@ class POTStore:
             return candidates[:limit]
         scored: list[tuple[int, ROT]] = []
         for rot in candidates:
-            haystack = (
-                f"{rot.name} {rot.description} {rot.role} {rot.body}"
-            ).lower()
+            haystack = (f"{rot.name} {rot.description} {rot.role} {rot.body}").lower()
             score = haystack.count(query) * 3
             for term in query.split():
                 if term in haystack:

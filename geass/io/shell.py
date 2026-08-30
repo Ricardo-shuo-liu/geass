@@ -1,11 +1,11 @@
 """系统级辅助操作：打开新的终端窗口执行 shell 命令。"""
+
 from __future__ import annotations
 
 import os
 import platform
 import subprocess
 import time
-
 
 # 从 VS Code（snap 版）集成终端等环境继承来的变量，会让宿主 GTK 应用加载
 # snap 的 GTK 模块，把 /snap/core20 库路径注入动态链接器搜索路径，导致
@@ -77,8 +77,7 @@ def _open_linux(command: str) -> dict:
         return {
             "ok": False,
             "error": (
-                "当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），"
-                "无法打开可见的终端窗口"
+                "当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），无法打开可见的终端窗口"
             ),
         }
     line = command.strip()
@@ -96,7 +95,7 @@ def _open_linux(command: str) -> dict:
         argv = build()
         try:
             process = _detached(argv)
-        except FileNotFoundError as exc:
+        except FileNotFoundError:
             last_error = f"{argv[0]}（未安装）"
             continue
         except OSError as exc:

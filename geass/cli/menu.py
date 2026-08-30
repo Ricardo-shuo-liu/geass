@@ -1,11 +1,12 @@
 """claude-cmd 风格主菜单：纯 ANSI 文本渲染，方向键导航，分组菜单。"""
+
 from __future__ import annotations
 
 import os
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .keys import raw_mode, read_key
 
@@ -64,11 +65,7 @@ class MenuModel:
             self.index = indexes[0]
 
     def option_indexes(self) -> list[int]:
-        return [
-            index
-            for index, item in enumerate(self.items)
-            if item.kind in ("option", "exit")
-        ]
+        return [index for index, item in enumerate(self.items) if item.kind in ("option", "exit")]
 
     def move(self, delta: int) -> None:
         indexes = self.option_indexes()

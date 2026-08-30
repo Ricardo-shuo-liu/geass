@@ -1,11 +1,12 @@
 """屏幕抓取与实时帧流。"""
+
 from __future__ import annotations
 
 import asyncio
 import io
 import logging
 import threading
-from typing import Any
+from typing import Any, cast
 
 from PIL import Image
 
@@ -18,14 +19,15 @@ def image_difference(before: Image.Image, after: Image.Image, size: int = 64) ->
     先把图像转成灰度并缩放到 ``size x size``，再逐像素比较。阈值由调用方
     决定：不同内容的截图通常差异率明显高于纯鼠标悬停造成的细微变化。
     """
-    left = before.convert("L").resize((size, size), Image.BILINEAR)
-    right = after.convert("L").resize((size, size), Image.BILINEAR)
+    left = before.convert("L").resize((size, size), Image.Resampling.BILINEAR)
+    right = after.convert("L").resize((size, size), Image.Resampling.BILINEAR)
     left_px = left.load()
     right_px = right.load()
+    assert left_px is not None and right_px is not None
     total = 0.0
     for y in range(size):
         for x in range(size):
-            total += abs(left_px[x, y] - right_px[x, y])
+            total += abs(cast(int, left_px[x, y]) - cast(int, right_px[x, y]))
     return total / (size * size * 255.0)
 
 
@@ -40,8 +42,16 @@ class ScreenCapture:
         if self._sct is None:
             import mss
 
-            self._sct = mss.mss()
+            self._sct = mss.MSS()
         return self._sct
+
+    def monitor_count(self) -> int:
+        """物理显示器数量；mss 不可用时返回 0（未知）。"""
+        try:
+            sct = self._ensure_sct()
+            return max(0, len(sct.monitors) - 1)
+        except Exception:
+            return 0
 
     def capture_image(self, max_edge: int | None = None) -> Image.Image:
         with self._lock:
@@ -65,7 +75,7 @@ class ScreenCapture:
                 return image
             scale = self.max_width / width
         return image.resize(
-            (round(width * scale), round(height * scale)), Image.BILINEAR
+            (round(width * scale), round(height * scale)), Image.Resampling.BILINEAR
         )
 
     def capture_jpeg(self, max_edge: int | None = None) -> bytes:

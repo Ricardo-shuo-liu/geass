@@ -12,6 +12,7 @@
 `~/.geass/env.toml`，下次运行无需重复配置；也可用
 `python -m geass.config set ...` 手动管理。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,7 +52,7 @@ class ScreenConfig:
 
 @dataclass
 class AgentConfig:
-    model: str = "gpt-5.6-terra"
+    model: str = "deepseek-v4-flash"
     max_steps: int = 30
     image_max_edge: int = 1568
     base_url: str = ""
@@ -63,6 +64,11 @@ class AgentConfig:
     ocr_base_url: str = "https://paddleocr.aistudio-app.com"
     ocr_timeout: float = 90.0
     terminal_timeout: float = 15.0
+    model_max_retries: int = 3
+    model_retry_base_delay: float = 2.0
+    model_fail_limit: int = 3
+    ocr_retry_base_delay: float = 5.0
+    ocr_retry_max_delay: float = 120.0
     skills_dir: str = "skills"
     memory_enabled: bool = True
     memory_path: str = ""
@@ -190,9 +196,8 @@ def save_user_env(updates: dict[str, Any]) -> Path:
 
 
 def load_config(path: str | Path | None = None, persist: bool = False) -> Config:
-    config_path = Path(
-        path or os.environ.get("GEASS_CONFIG", DEFAULT_CONFIG_PATH)
-    ).expanduser().resolve()
+    raw = path or os.environ.get("GEASS_CONFIG") or DEFAULT_CONFIG_PATH
+    config_path = Path(raw).expanduser().resolve()
 
     project = _read_toml(config_path)
     user = _read_toml(user_env_path())
@@ -209,26 +214,20 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
 
     # Token 每次启动随机生成，不持久化；如需固定可显式设置
     # GEASS_TOKEN 环境变量或 config.toml 的 server.token。
-    token = os.environ.get("GEASS_TOKEN") or str(
-        pick(p_server, "token", "") or ""
-    )
+    token = os.environ.get("GEASS_TOKEN") or str(pick(p_server, "token", "") or "")
     if not token:
         token = secrets.token_urlsafe(9)
 
     model = os.environ.get(
         "GEASS_MODEL",
-        str(pick(u_agent, "model", pick(p_agent, "model", "gpt-5.6-terra"))),
+        str(pick(u_agent, "model", pick(p_agent, "model", "deepseek-v4-flash"))),
     )
     base_url = os.environ.get(
         "GEASS_BASE_URL",
         str(pick(u_agent, "base_url", pick(p_agent, "base_url", "")) or ""),
     )
-    api_key = os.environ.get(
-        "GEASS_API_KEY", str(pick(u_agent, "api_key", "") or "")
-    )
-    vision = bool(
-        pick(u_agent, "vision", pick(p_agent, "vision", True))
-    )
+    api_key = os.environ.get("GEASS_API_KEY", str(pick(u_agent, "api_key", "") or ""))
+    vision = bool(pick(u_agent, "vision", pick(p_agent, "vision", True)))
     vision_whitelist_value = os.environ.get("GEASS_VISION_WHITELIST")
     if not vision_whitelist_value:
         vision_whitelist_value = pick(
@@ -236,15 +235,11 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
         )
     if isinstance(vision_whitelist_value, str):
         vision_whitelist = tuple(
-            item.strip()
-            for item in str(vision_whitelist_value).split(",")
-            if item.strip()
+            item.strip() for item in str(vision_whitelist_value).split(",") if item.strip()
         )
     elif isinstance(vision_whitelist_value, (list, tuple)):
         vision_whitelist = tuple(
-            str(item).strip()
-            for item in vision_whitelist_value
-            if str(item).strip()
+            str(item).strip() for item in vision_whitelist_value if str(item).strip()
         )
     else:
         vision_whitelist = ()
@@ -293,13 +288,45 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             )
         ),
     )
+    model_max_retries = max(
+        0, int(pick(u_agent, "model_max_retries", pick(p_agent, "model_max_retries", 3)))
+    )
+    model_retry_base_delay = max(
+        0.0,
+        float(
+            pick(
+                u_agent,
+                "model_retry_base_delay",
+                pick(p_agent, "model_retry_base_delay", 2.0),
+            )
+        ),
+    )
+    model_fail_limit = max(
+        1, int(pick(u_agent, "model_fail_limit", pick(p_agent, "model_fail_limit", 3)))
+    )
+    ocr_retry_base_delay = max(
+        0.0,
+        float(
+            pick(
+                u_agent,
+                "ocr_retry_base_delay",
+                pick(p_agent, "ocr_retry_base_delay", 5.0),
+            )
+        ),
+    )
+    ocr_retry_max_delay = max(
+        ocr_retry_base_delay,
+        float(
+            pick(
+                u_agent,
+                "ocr_retry_max_delay",
+                pick(p_agent, "ocr_retry_max_delay", 120.0),
+            )
+        ),
+    )
     skills_dir = str(pick(u_agent, "skills_dir", pick(p_agent, "skills_dir", "skills")))
-    memory_enabled = bool(
-        pick(u_agent, "memory_enabled", pick(p_agent, "memory_enabled", True))
-    )
-    memory_path = str(
-        pick(u_agent, "memory_path", pick(p_agent, "memory_path", "")) or ""
-    )
+    memory_enabled = bool(pick(u_agent, "memory_enabled", pick(p_agent, "memory_enabled", True)))
+    memory_path = str(pick(u_agent, "memory_path", pick(p_agent, "memory_path", "")) or "")
     memory_max_entries = max(
         1,
         int(
@@ -320,12 +347,8 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             )
         ),
     )
-    skill_root = str(
-        pick(u_agent, "skill_root", pick(p_agent, "skill_root", "")) or ""
-    )
-    schedule_path = str(
-        pick(u_agent, "schedule_path", pick(p_agent, "schedule_path", "")) or ""
-    )
+    skill_root = str(pick(u_agent, "skill_root", pick(p_agent, "skill_root", "")) or "")
+    schedule_path = str(pick(u_agent, "schedule_path", pick(p_agent, "schedule_path", "")) or "")
     evolution_enabled = bool(
         pick(
             u_agent,
@@ -366,12 +389,8 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             ),
         ),
     )
-    rag_path = str(
-        pick(u_agent, "rag_path", pick(p_agent, "rag_path", "")) or ""
-    )
-    rag_enabled = bool(
-        pick(u_agent, "rag_enabled", pick(p_agent, "rag_enabled", True))
-    )
+    rag_path = str(pick(u_agent, "rag_path", pick(p_agent, "rag_path", "")) or "")
+    rag_enabled = bool(pick(u_agent, "rag_enabled", pick(p_agent, "rag_enabled", True)))
     rag_inject_enabled = bool(
         pick(
             u_agent,
@@ -438,9 +457,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
         )
         or "text-embedding-3-small"
     )
-    pot_enabled = bool(
-        pick(u_agent, "pot_enabled", pick(p_agent, "pot_enabled", True))
-    )
+    pot_enabled = bool(pick(u_agent, "pot_enabled", pick(p_agent, "pot_enabled", True)))
     pot_inject_cot = bool(
         pick(
             u_agent,
@@ -462,9 +479,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             int(pick(u_agent, "pot_rot_hits", pick(p_agent, "pot_rot_hits", 2))),
         ),
     )
-    pot_path = str(
-        pick(u_agent, "pot_path", pick(p_agent, "pot_path", "")) or ""
-    )
+    pot_path = str(pick(u_agent, "pot_path", pick(p_agent, "pot_path", "")) or "")
     cli_rounds = max(
         1,
         min(
@@ -561,9 +576,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             )
         ),
     )
-    security_enabled = bool(
-        pick(u_security, "enabled", pick(p_security, "enabled", True))
-    )
+    security_enabled = bool(pick(u_security, "enabled", pick(p_security, "enabled", True)))
     security_timeout = max(
         5.0,
         float(
@@ -574,9 +587,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             )
         ),
     )
-    security_patterns_value = pick(
-        u_security, "patterns", pick(p_security, "patterns", [])
-    )
+    security_patterns_value = pick(u_security, "patterns", pick(p_security, "patterns", []))
     if isinstance(security_patterns_value, (list, tuple)):
         security_patterns = tuple(
             str(item) for item in security_patterns_value if str(item).strip()
@@ -608,6 +619,11 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             ocr_base_url=ocr_base_url,
             ocr_timeout=ocr_timeout,
             terminal_timeout=terminal_timeout,
+            model_max_retries=model_max_retries,
+            model_retry_base_delay=model_retry_base_delay,
+            model_fail_limit=model_fail_limit,
+            ocr_retry_base_delay=ocr_retry_base_delay,
+            ocr_retry_max_delay=ocr_retry_max_delay,
             skills_dir=skills_dir,
             memory_enabled=memory_enabled,
             memory_path=memory_path,
@@ -723,12 +739,8 @@ def main() -> None:
     set_parser.add_argument("--api-key", help="API Key")
     set_parser.add_argument("--base-url", help="OpenAI 兼容端点，如 https://api.deepseek.com")
     set_parser.add_argument("--model", help="模型名，如 deepseek-chat")
-    set_parser.add_argument(
-        "--vision", choices=["true", "false"], help="模型是否支持图像输入"
-    )
-    set_parser.add_argument(
-        "--ocr", choices=["true", "false"], help="是否启用 PaddleOCR 屏幕识别"
-    )
+    set_parser.add_argument("--vision", choices=["true", "false"], help="模型是否支持图像输入")
+    set_parser.add_argument("--ocr", choices=["true", "false"], help="是否启用 PaddleOCR 屏幕识别")
     set_parser.add_argument("--ocr-token", help="PaddleOCR AI Studio 访问 Token")
     set_parser.add_argument(
         "--ocr-model", help="PaddleOCR 模型，如 PaddleOCR-VL-1.6 / PP-StructureV3"
@@ -747,18 +759,10 @@ def main() -> None:
         choices=["true", "false"],
         help="是否启用持久记忆（默认 true）",
     )
-    set_parser.add_argument(
-        "--memory-path", help="记忆目录路径（默认 ~/.geass/.memory）"
-    )
-    set_parser.add_argument(
-        "--skill-root", help="运行时 SKILL 根目录（默认 ~/.geass/.skill）"
-    )
-    set_parser.add_argument(
-        "--schedule-path", help="定时任务目录（默认 ~/.geass/.schedule）"
-    )
-    set_parser.add_argument(
-        "--rag-path", help="RAG 存储根目录（默认 ~/.geass/.rag）"
-    )
+    set_parser.add_argument("--memory-path", help="记忆目录路径（默认 ~/.geass/.memory）")
+    set_parser.add_argument("--skill-root", help="运行时 SKILL 根目录（默认 ~/.geass/.skill）")
+    set_parser.add_argument("--schedule-path", help="定时任务目录（默认 ~/.geass/.schedule）")
+    set_parser.add_argument("--rag-path", help="RAG 存储根目录（默认 ~/.geass/.rag）")
     set_parser.add_argument(
         "--rag-enabled",
         choices=["true", "false"],
@@ -812,9 +816,7 @@ def main() -> None:
         type=int,
         help="注入 ROT 数量（0~5，默认 2）",
     )
-    set_parser.add_argument(
-        "--pot-path", help="POT 存储根目录（默认 ~/.geass/.pot）"
-    )
+    set_parser.add_argument("--pot-path", help="POT 存储根目录（默认 ~/.geass/.pot）")
     set_parser.add_argument(
         "--cli-rounds",
         dest="cli_rounds",
@@ -887,9 +889,7 @@ def main() -> None:
         choices=["true", "false"],
         help="是否启用高危 shell 命令审核",
     )
-    set_parser.add_argument(
-        "--approval-timeout", type=float, help="命令审核超时秒数（最低 5 秒）"
-    )
+    set_parser.add_argument("--approval-timeout", type=float, help="命令审核超时秒数（最低 5 秒）")
 
     args = parser.parse_args()
     if args.command == "show":
@@ -936,9 +936,7 @@ def main() -> None:
             f"path={config.agent.pot_path or '~/.geass/.pot'}"
         )
         print(
-            "cli       = "
-            f"rounds={config.agent.cli_rounds}, "
-            f"subagents={config.agent.cli_subagents}"
+            f"cli       = rounds={config.agent.cli_rounds}, subagents={config.agent.cli_subagents}"
         )
         print(
             "background= "
@@ -990,9 +988,7 @@ def main() -> None:
         updates["agent"]["ocr_base_url"] = args.ocr_base_url
     if args.vision_whitelist is not None:
         updates["agent"]["vision_whitelist"] = [
-            item.strip()
-            for item in args.vision_whitelist.split(",")
-            if item.strip()
+            item.strip() for item in args.vision_whitelist.split(",") if item.strip()
         ]
     if args.skills_dir:
         updates["agent"]["skills_dir"] = args.skills_dir
@@ -1009,21 +1005,15 @@ def main() -> None:
     if args.rag_enabled is not None:
         updates["agent"]["rag_enabled"] = args.rag_enabled == "true"
     if args.rag_inject_enabled is not None:
-        updates["agent"]["rag_inject_enabled"] = (
-            args.rag_inject_enabled == "true"
-        )
+        updates["agent"]["rag_inject_enabled"] = args.rag_inject_enabled == "true"
     if args.rag_inject_min_score is not None:
         updates["agent"]["rag_inject_min_score"] = max(
             0.0, min(1.0, float(args.rag_inject_min_score))
         )
     if args.rag_inject_hits is not None:
-        updates["agent"]["rag_inject_hits"] = max(
-            1, min(20, int(args.rag_inject_hits))
-        )
+        updates["agent"]["rag_inject_hits"] = max(1, min(20, int(args.rag_inject_hits)))
     if args.embedding_enabled is not None:
-        updates["agent"]["embedding_enabled"] = (
-            args.embedding_enabled == "true"
-        )
+        updates["agent"]["embedding_enabled"] = args.embedding_enabled == "true"
     if args.embedding_base_url:
         updates["agent"]["embedding_base_url"] = args.embedding_base_url
     if args.embedding_model:
@@ -1035,65 +1025,41 @@ def main() -> None:
     if args.pot_inject_rot is not None:
         updates["agent"]["pot_inject_rot"] = args.pot_inject_rot == "true"
     if args.pot_rot_hits is not None:
-        updates["agent"]["pot_rot_hits"] = max(
-            0, min(5, int(args.pot_rot_hits))
-        )
+        updates["agent"]["pot_rot_hits"] = max(0, min(5, int(args.pot_rot_hits)))
     if args.pot_path:
         updates["agent"]["pot_path"] = args.pot_path
     if args.cli_rounds is not None:
         updates["agent"]["cli_rounds"] = max(1, min(10, int(args.cli_rounds)))
     if args.cli_subagents is not None:
-        updates["agent"]["cli_subagents"] = max(
-            1, min(6, int(args.cli_subagents))
-        )
+        updates["agent"]["cli_subagents"] = max(1, min(6, int(args.cli_subagents)))
     if args.background_enabled is not None:
-        updates["agent"]["background_enabled"] = (
-            args.background_enabled == "true"
-        )
+        updates["agent"]["background_enabled"] = args.background_enabled == "true"
     if args.background_max_tasks is not None:
-        updates["agent"]["background_max_tasks"] = max(
-            1, min(50, int(args.background_max_tasks))
-        )
+        updates["agent"]["background_max_tasks"] = max(1, min(50, int(args.background_max_tasks)))
     if args.evolution_max_tokens is not None:
-        updates["agent"]["evolution_max_tokens"] = max(
-            200, int(args.evolution_max_tokens)
-        )
+        updates["agent"]["evolution_max_tokens"] = max(200, int(args.evolution_max_tokens))
     if args.pot_reflect_max_tokens is not None:
-        updates["agent"]["pot_reflect_max_tokens"] = max(
-            200, int(args.pot_reflect_max_tokens)
-        )
+        updates["agent"]["pot_reflect_max_tokens"] = max(200, int(args.pot_reflect_max_tokens))
     if args.context_compress_enabled is not None:
-        updates["agent"]["context_compress_enabled"] = (
-            args.context_compress_enabled == "true"
-        )
+        updates["agent"]["context_compress_enabled"] = args.context_compress_enabled == "true"
     if args.context_compress_after is not None:
         updates["agent"]["context_compress_after"] = max(
             4, min(100, int(args.context_compress_after))
         )
     if args.context_compress_chars is not None:
-        updates["agent"]["context_compress_chars"] = max(
-            4000, int(args.context_compress_chars)
-        )
+        updates["agent"]["context_compress_chars"] = max(4000, int(args.context_compress_chars))
     if args.evolution_enabled is not None:
         updates["agent"]["evolution_enabled"] = args.evolution_enabled == "true"
     if args.evolution_idle_seconds is not None:
-        updates["agent"]["evolution_idle_seconds"] = max(
-            30.0, float(args.evolution_idle_seconds)
-        )
+        updates["agent"]["evolution_idle_seconds"] = max(30.0, float(args.evolution_idle_seconds))
     if args.evolution_interval is not None:
-        updates["agent"]["evolution_interval"] = max(
-            60.0, float(args.evolution_interval)
-        )
+        updates["agent"]["evolution_interval"] = max(60.0, float(args.evolution_interval))
     if args.evolution_max_skills is not None:
-        updates["agent"]["evolution_max_skills"] = max(
-            1, min(100, int(args.evolution_max_skills))
-        )
+        updates["agent"]["evolution_max_skills"] = max(1, min(100, int(args.evolution_max_skills)))
     if args.security_enabled is not None:
         updates["security"]["enabled"] = args.security_enabled == "true"
     if args.approval_timeout is not None:
-        updates["security"]["approval_timeout"] = max(
-            5.0, float(args.approval_timeout)
-        )
+        updates["security"]["approval_timeout"] = max(5.0, float(args.approval_timeout))
     if not updates["agent"] and not updates["security"]:
         parser.error("请至少提供一个 --xxx 参数")
     path = save_user_env(updates)

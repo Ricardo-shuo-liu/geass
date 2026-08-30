@@ -4,6 +4,7 @@
 条目保存在其中的 ``entries.json``。写入采用临时文件 + 原子替换，多个进程
 同时写时以最后一次替换为准，足够当前"同时只跑一个任务"的使用场景。
 """
+
 # 包化后的对外入口：保持 from geass.memory import Memory 兼容。
 from __future__ import annotations
 
@@ -101,9 +102,7 @@ class Memory:
                 "version": 1,
                 "entries": [entry.to_dict() for entry in self._sorted()],
             }
-            tmp = self.entries_path.with_suffix(
-                self.entries_path.suffix + ".tmp"
-            )
+            tmp = self.entries_path.with_suffix(self.entries_path.suffix + ".tmp")
             tmp.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -125,9 +124,7 @@ class Memory:
 
     def _trim(self) -> None:
         while len(self._entries) > self.max_entries:
-            oldest = min(
-                self._entries.values(), key=lambda entry: entry.updated_at
-            )
+            oldest = min(self._entries.values(), key=lambda entry: entry.updated_at)
             self._entries.pop(oldest.key.casefold(), None)
 
     def remember(self, key: str, value: str) -> MemoryEntry:

@@ -36,9 +36,7 @@ def test_task_manager_start_list_and_finish(tmp_path):
         task_id = result["task_id"]
 
         for _ in range(100):
-            task = next(
-                item for item in manager.list() if item["id"] == task_id
-            )
+            task = next(item for item in manager.list() if item["id"] == task_id)
             if task["status"] == "done":
                 assert task["result"]["message"] == "完成"
                 assert manager.tasks_active() is False
@@ -63,9 +61,7 @@ def test_task_manager_cancel(tmp_path):
         assert manager.cancel(task_id) is True
 
         for _ in range(100):
-            task = next(
-                item for item in manager.list() if item["id"] == task_id
-            )
+            task = next(item for item in manager.list() if item["id"] == task_id)
             if task["status"] == "cancelled":
                 return
             await asyncio.sleep(0.02)

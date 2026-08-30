@@ -6,6 +6,7 @@
 「已配置/未配置」，绝不打印具体值。最后输出结论并以退出码表示结果
 （0 = 可运行，1 = 存在缺失项）。
 """
+
 from __future__ import annotations
 
 import os
@@ -28,11 +29,7 @@ class CheckItem:
 
 
 def _vision_enabled(config) -> bool:
-    whitelist = {
-        name.strip().casefold()
-        for name in config.agent.vision_whitelist
-        if name.strip()
-    }
+    whitelist = {name.strip().casefold() for name in config.agent.vision_whitelist if name.strip()}
     if whitelist:
         return config.agent.model.strip().casefold() in whitelist
     return config.agent.vision
@@ -90,11 +87,7 @@ def collect_checks(config) -> list[CheckItem]:
 
     vision = _vision_enabled(config)
     if vision:
-        mode = (
-            "视觉模式（模型在白名单内）"
-            if agent.vision_whitelist
-            else "视觉模式（vision=true）"
-        )
+        mode = "视觉模式（模型在白名单内）" if agent.vision_whitelist else "视觉模式（vision=true）"
     elif agent.ocr:
         mode = "非视觉模型，将自动与 PaddleOCR 配对"
     else:
@@ -106,11 +99,7 @@ def collect_checks(config) -> list[CheckItem]:
         CheckItem(
             "API 访问",
             api_ready,
-            detail=(
-                "已配置"
-                if api_ready
-                else "未配置 API Key，也未设置 base_url"
-            ),
+            detail=("已配置" if api_ready else "未配置 API Key，也未设置 base_url"),
         )
     )
     checks.append(
@@ -148,6 +137,21 @@ def collect_checks(config) -> list[CheckItem]:
             detail=f"{agent.ocr_model} @ {agent.ocr_base_url}",
         )
     )
+
+    from .screen import ScreenCapture
+
+    monitor_count = ScreenCapture().monitor_count()
+    if monitor_count > 1:
+        checks.append(
+            CheckItem(
+                "多显示器",
+                True,
+                warn=True,
+                detail=f"检测到 {monitor_count} 块物理屏，当前只操作主屏，其他屏幕请手动直控",
+            )
+        )
+    else:
+        checks.append(CheckItem("多显示器", True, detail="未检测到多屏，无限制"))
 
     from .io.accessibility import is_available
 
@@ -208,11 +212,7 @@ def collect_checks(config) -> list[CheckItem]:
                 "用户配置："
                 + (
                     "存在"
-                    if Path(
-                        os.environ.get(
-                            "GEASS_HOME", os.path.expanduser("~")
-                        )
-                    )
+                    if Path(os.environ.get("GEASS_HOME", os.path.expanduser("~")))
                     .joinpath(".geass", "env.toml")
                     .exists()
                     else "缺失（使用默认值）"

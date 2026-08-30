@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from geass.rag.chunker import (
     chunk_text,
     iter_source_files,

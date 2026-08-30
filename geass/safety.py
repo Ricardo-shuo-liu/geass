@@ -7,14 +7,19 @@
 `config.toml` 的 `[security].patterns` 为空时使用内置默认规则；填写后
 整体替换默认规则（用户自定义的正则仍是不区分大小写的搜索）。
 """
+
 from __future__ import annotations
 
 import logging
 import re
+import shlex
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 logger = logging.getLogger(__name__)
+
+UNTRUSTED_BEGIN = "<<<UNTRUSTED-BEGIN>>>"
+UNTRUSTED_END = "<<<UNTRUSTED-END>>>"
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,9 @@ _DEFAULT_RULES: tuple[tuple[str, str], ...] = (
         r"\b(apt|apt-get|dnf|yum|pacman|pip3?|npm|pnpm)\s+(remove|purge|uninstall)\b",
         "卸载/移除软件包",
     ),
+    (r"\|\s*(ba|z|da)?sh\b", "命令管道进 shell 执行"),
+    (r"\b(base64|xxd)\b[^\n]*\|", "解码内容并管道输出"),
+    (r"\b(eval|source)\b|\b(bash|sh|zsh)\s+-c\b", "eval/source 或 shell -c 执行"),
 )
 
 
@@ -57,9 +65,7 @@ def default_patterns() -> tuple[str, ...]:
     return tuple(pattern for pattern, _ in _DEFAULT_RULES)
 
 
-def evaluate_command(
-    command: str, patterns: Iterable[str] | None = None
-) -> SafetyVerdict:
+def evaluate_command(command: str, patterns: Iterable[str] | None = None) -> SafetyVerdict:
     """判断命令是否命中黑名单。
 
     `patterns` 为 `None` 或空时使用内置默认规则；否则用自定义规则整体替换。
@@ -75,10 +81,46 @@ def evaluate_command(
     else:
         rules = _DEFAULT_RULES
 
+    variants = [text]
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        tokens = []
+    if tokens:
+        joined = shlex.join(tokens)
+        if joined != text:
+            variants.append(joined)
+
     for pattern, reason in rules:
-        try:
-            if re.search(pattern, text, flags=re.IGNORECASE):
-                return SafetyVerdict(blocked=True, reason=reason)
-        except re.error:
-            logger.warning("忽略无效的安全规则正则：%r", pattern)
+        for variant in variants:
+            try:
+                if re.search(pattern, variant, flags=re.IGNORECASE):
+                    return SafetyVerdict(blocked=True, reason=reason)
+            except re.error:
+                logger.warning("忽略无效的安全规则正则：%r", pattern)
     return SafetyVerdict(blocked=False)
+
+
+_INJECTION_PHRASES: tuple[tuple[str, str], ...] = (
+    ("ignore previous instructions", "要求忽略此前指令"),
+    ("ignore all previous", "要求忽略所有此前指令"),
+    ("ignore the above", "要求忽略上文"),
+    ("disregard previous", "要求无视此前内容"),
+    ("do not follow", "要求不遵守指令"),
+    ("override system", "要求覆盖系统指令"),
+    ("forget your instructions", "要求遗忘指令"),
+    ("忽略之前的指令", "要求忽略此前指令"),
+    ("忽略以上", "要求忽略上文"),
+    ("无视之前的", "要求无视此前内容"),
+    ("不要遵守", "要求不遵守指令"),
+    ("不要执行", "要求不执行指令"),
+)
+
+
+def check_injected_content(text: str) -> str | None:
+    """检测疑似指令覆盖/提示注入的内容；命中返回原因，否则返回 None。"""
+    lowered = str(text or "").casefold()
+    for phrase, reason in _INJECTION_PHRASES:
+        if phrase.casefold() in lowered:
+            return reason
+    return None

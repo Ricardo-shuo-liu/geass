@@ -17,6 +17,7 @@
 提示符、逐字输入与输出，不会出现 `GEASS_P1=...` 之类的内部哨兵。系统
 没有 bash 时才退回旧的 sentinel 方式。
 """
+
 from __future__ import annotations
 
 import errno
@@ -65,10 +66,7 @@ def extract_output(
     text = raw.replace("\r\n", "\n").replace("\r", "\n")
     hidden = {command.strip()}
     hidden.update(line.strip() for line in hidden_lines if line.strip())
-    lines = [
-        PROMPT_RE.sub("", line).rstrip()
-        for line in text.split("\n")
-    ]
+    lines = [PROMPT_RE.sub("", line).rstrip() for line in text.split("\n")]
     return "\n".join(
         line
         for line in lines
@@ -104,7 +102,7 @@ class TerminalSession:
         self._lock = threading.Lock()
 
     @classmethod
-    def start(cls) -> "TerminalSession":
+    def start(cls) -> TerminalSession:
         root = Path(tempfile.mkdtemp(prefix="geass-term-"))
         fifo = root / "input.fifo"
         log_path = root / "output.log"
@@ -116,18 +114,12 @@ class TerminalSession:
             marker_path = root / "command.marker"
             rcfile = root / "bashrc"
             rcfile.write_text(
-                "PROMPT_COMMAND='printf x >> "
-                f"{shlex.quote(str(marker_path))}'\n"
-                "PS1='$ '\n",
+                f"PROMPT_COMMAND='printf x >> {shlex.quote(str(marker_path))}'\nPS1='$ '\n",
                 encoding="utf-8",
             )
-            shell_command = (
-                f"bash --noprofile --rcfile {shlex.quote(str(rcfile))} -i"
-            )
+            shell_command = f"bash --noprofile --rcfile {shlex.quote(str(rcfile))} -i"
         try:
-            process, terminal_cmd = _launch_visible_terminal(
-                fifo, log_path, shell_command
-            )
+            process, terminal_cmd = _launch_visible_terminal(fifo, log_path, shell_command)
         except Exception:
             shutil.rmtree(root, ignore_errors=True)
             raise
@@ -234,9 +226,7 @@ class TerminalSession:
         except OSError:
             return 0
 
-    def _execute_with_marker(
-        self, command: str, timeout: float
-    ) -> dict[str, Any]:
+    def _execute_with_marker(self, command: str, timeout: float) -> dict[str, Any]:
         """bash + PROMPT_COMMAND 边带：窗口里不出现任何内部哨兵。"""
         with self._lock:
             deadline = time.monotonic() + timeout
@@ -265,11 +255,7 @@ class TerminalSession:
                 if self._marker_size() > initial:
                     self._read_cursor = len(self._raw_data())
                     output = extract_output(
-                        clean_ansi(
-                            self._raw_data()[started:].decode(
-                                "utf-8", errors="replace"
-                            )
-                        ),
+                        clean_ansi(self._raw_data()[started:].decode("utf-8", errors="replace")),
                         command,
                     )
                     return {
@@ -281,11 +267,7 @@ class TerminalSession:
                 if time.monotonic() >= deadline:
                     self._read_cursor = len(self._raw_data())
                     output = extract_output(
-                        clean_ansi(
-                            self._raw_data()[started:].decode(
-                                "utf-8", errors="replace"
-                            )
-                        ),
+                        clean_ansi(self._raw_data()[started:].decode("utf-8", errors="replace")),
                         command,
                     )
                     return {
@@ -300,16 +282,13 @@ class TerminalSession:
                     }
                 time.sleep(0.05)
 
-    def _execute_with_sentinel(
-        self, command: str, timeout: float
-    ) -> dict[str, Any]:
+    def _execute_with_sentinel(self, command: str, timeout: float) -> dict[str, Any]:
         """无 bash 时的兜底：用唯一 sentinel 检测命令结束。"""
         marker = f"__GEASS_DONE_{secrets.token_hex(6)}__"
         middle = len(marker) // 2
         part1, part2 = marker[:middle], marker[middle:]
         sentinel_command = (
-            f"GEASS_P1='{part1}'; GEASS_P2='{part2}';"
-            ' printf \'%s%s\\n\' "$GEASS_P1" "$GEASS_P2"'
+            f"GEASS_P1='{part1}'; GEASS_P2='{part2}'; printf '%s%s\\n' \"$GEASS_P1\" \"$GEASS_P2\""
         )
         with self._lock:
             started = len(self._raw_data())
@@ -332,11 +311,7 @@ class TerminalSession:
                         end = len(region)
                     self._read_cursor = started + end
                     output = extract_output(
-                        clean_ansi(
-                            region[:found].decode(
-                                "utf-8", errors="replace"
-                            )
-                        ),
+                        clean_ansi(region[:found].decode("utf-8", errors="replace")),
                         command,
                         (sentinel_command,),
                         ("GEASS_P1=", "GEASS_P2="),
@@ -350,9 +325,7 @@ class TerminalSession:
                 if time.monotonic() >= deadline:
                     self._read_cursor = len(data)
                     output = extract_output(
-                        clean_ansi(
-                            region.decode("utf-8", errors="replace")
-                        ),
+                        clean_ansi(region.decode("utf-8", errors="replace")),
                         command,
                         (sentinel_command,),
                         ("GEASS_P1=", "GEASS_P2="),
@@ -390,8 +363,7 @@ def _launch_visible_terminal(
 ) -> tuple[subprocess.Popen, str]:
     if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
         raise TerminalError(
-            "当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），"
-            "无法打开可见的终端窗口"
+            "当前会话没有图形环境（DISPLAY/WAYLAND_DISPLAY 未设置），无法打开可见的终端窗口"
         )
 
     env = terminal_env()
@@ -433,10 +405,7 @@ def _launch_visible_terminal(
             return process, argv[0]
         detail = ""
         try:
-            lines = [
-                line.strip()
-                for line in err_path.read_text(errors="replace").splitlines()
-            ]
+            lines = [line.strip() for line in err_path.read_text(errors="replace").splitlines()]
             detail = next((line for line in reversed(lines) if line), "")
         except OSError:
             pass
@@ -464,6 +433,7 @@ def _terminal_candidates(run_line: str) -> list[list[str]]:
         ["alacritty", "-e", "sh", "-c", run_line],
         ["kitty", "sh", "-c", run_line],
     ]
+
 
 class TerminalManager:
     """进程内终端会话注册表。"""

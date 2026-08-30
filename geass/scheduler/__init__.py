@@ -4,6 +4,7 @@
 复用与手动命令相同的 Agent 启动流程。若当时已有任务在运行，则该定时任务
 延迟几秒重试，而不是直接失败。
 """
+
 # 包化后的对外入口：保持 from geass.scheduler import Scheduler 等兼容。
 from __future__ import annotations
 
@@ -14,9 +15,10 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -90,11 +92,7 @@ class ScheduleStore:
     def _save(self) -> None:
         payload = {
             "version": 1,
-            "jobs": [
-                job.to_dict()
-                for job in self._sorted()
-                if job.persistent
-            ],
+            "jobs": [job.to_dict() for job in self._sorted() if job.persistent],
         }
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(

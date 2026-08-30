@@ -47,9 +47,7 @@ def test_fully_configured_vision_mode_is_ready(monkeypatch):
     checks = collect_checks(config)
 
     assert all(item.ok for item in checks)
-    assert "视觉模式" in next(
-        item.detail for item in checks if item.name == "模型模式"
-    )
+    assert "视觉模式" in next(item.detail for item in checks if item.name == "模型模式")
     assert summarize(checks) == "环境完整，可以运行 Geass。"
 
 
@@ -78,6 +76,21 @@ def test_non_vision_model_without_ocr_token_warns():
     assert ocr_item.ok is False
     assert ocr_item.warn is True
     assert "PaddleOCR Token" in summarize(checks)
+
+
+def test_multi_monitor_warns(monkeypatch):
+    monkeypatch.setenv("DISPLAY", ":1")
+    monkeypatch.setitem(sys.modules, "pyatspi", types.SimpleNamespace())
+    monkeypatch.setattr("geass.screen.ScreenCapture.monitor_count", lambda self: 2)
+    config = build_config()
+    config.api_key = "sk-test"
+
+    checks = collect_checks(config)
+    item = next(item for item in checks if item.name == "多显示器")
+
+    assert item.ok is True
+    assert item.warn is True
+    assert "只操作主屏" in item.detail
 
 
 def test_whitelist_non_member_uses_ocr_pairing():

@@ -1,4 +1,5 @@
 """进程级共享状态。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,7 @@ from ..memory import Memory
 from ..ocr import PaddleOCRBackend
 from ..rag import RAGManager
 from ..rag.embeddings import provider_from_config
-from ..scheduler import ScheduleStore, Scheduler
+from ..scheduler import Scheduler, ScheduleStore
 from ..screen import ScreenCapture, ScreenStreamer
 from ..skills import (
     load_skills,
@@ -73,21 +74,17 @@ def build_state(config: Config) -> AppState:
     backend = PyAutoGUIInputBackend()
     client = None
     if config.api_key or config.agent.base_url:
-        kwargs: dict = {"api_key": config.api_key or "not-needed"}
+        kwargs: dict = {"api_key": config.api_key or "not-needed", "max_retries": 0}
         if config.agent.base_url:
             kwargs["base_url"] = config.agent.base_url
         client = AsyncOpenAI(**kwargs)
 
     terminal_manager = TerminalManager(default_timeout=config.agent.terminal_timeout)
-    skill_source_dir = resolve_skills_dir(
-        config.agent.skills_dir, config.config_path
-    )
+    skill_source_dir = resolve_skills_dir(config.agent.skills_dir, config.config_path)
     skill_root = resolve_skill_root(config.agent.skill_root, config.config_path)
     sync_system_skills(skill_source_dir, skill_root)
     skills = load_skills(skill_root, config.config_path)
-    approval_manager = ApprovalManager(
-        default_timeout=config.security.approval_timeout
-    )
+    approval_manager = ApprovalManager(default_timeout=config.security.approval_timeout)
     ocr = (
         PaddleOCRBackend(
             token=config.agent.ocr_token,
@@ -115,11 +112,7 @@ def build_state(config: Config) -> AppState:
         if config.agent.rag_enabled
         else None
     )
-    pot = (
-        POTStore(config.agent.pot_path or None)
-        if config.agent.pot_enabled
-        else None
-    )
+    pot = POTStore(config.agent.pot_path or None) if config.agent.pot_enabled else None
 
     state = AppState(
         config=config,
@@ -174,7 +167,7 @@ def reload_state(state: AppState, config: Config) -> None:
     state.config = config
     client = None
     if config.api_key or config.agent.base_url:
-        kwargs: dict = {"api_key": config.api_key or "not-needed"}
+        kwargs: dict = {"api_key": config.api_key or "not-needed", "max_retries": 0}
         if config.agent.base_url:
             kwargs["base_url"] = config.agent.base_url
         client = AsyncOpenAI(**kwargs)
@@ -182,8 +175,9 @@ def reload_state(state: AppState, config: Config) -> None:
     state.agent.client = client
     state.agent.config = config.agent
     state.agent.vision = state.agent.resolve_vision()
-    state.agent.ocr_checked = False
     state.agent.ocr_ready = False
+    state.agent._ocr_last_attempt = 0.0
+    state.agent._ocr_failures = 0
     state.agent.ocr = (
         PaddleOCRBackend(
             token=config.agent.ocr_token,
@@ -215,11 +209,7 @@ def reload_state(state: AppState, config: Config) -> None:
         else None
     )
     state.agent.rag = state.rag
-    state.pot = (
-        POTStore(config.agent.pot_path or None)
-        if config.agent.pot_enabled
-        else None
-    )
+    state.pot = POTStore(config.agent.pot_path or None) if config.agent.pot_enabled else None
     state.agent.pot = state.pot
     if state.evolution is not None:
         state.evolution.pot = state.pot
@@ -236,9 +226,7 @@ def reload_state(state: AppState, config: Config) -> None:
             status_cb=lambda message: broadcast_control(state, message),
         )
     state.skill_source_dir = _resolve_source_dir(config)
-    state.skill_root = resolve_skill_root(
-        config.agent.skill_root, config.config_path
-    )
+    state.skill_root = resolve_skill_root(config.agent.skill_root, config.config_path)
     sync_system_skills(state.skill_source_dir, state.skill_root)
     state.skills = load_skills(state.skill_root, config.config_path)
     state.agent.skills = state.skills
@@ -299,8 +287,7 @@ def make_agent(state: AppState, status_cb=None) -> Agent:
         backend=state.backend,
         capture=state.capture,
         config=state.config.agent,
-        status_cb=status_cb
-        or (lambda message: broadcast_control(state, message)),
+        status_cb=status_cb or (lambda message: broadcast_control(state, message)),
         vision_fallback_cb=lambda: save_user_env({"agent": {"vision": False}}),
         skills=state.skills,
         terminal=state.terminal_manager,
@@ -312,17 +299,11 @@ def make_agent(state: AppState, status_cb=None) -> Agent:
         rag=state.rag,
         pot=state.pot,
         input_lock=state.input_lock,
-        background_starter=(
-            state.task_manager.start if state.task_manager is not None else None
-        ),
+        background_starter=(state.task_manager.start if state.task_manager is not None else None),
     )
 
 
 def _tasks_active(state: AppState) -> bool:
-    foreground_busy = (
-        state.agent_task is not None and not state.agent_task.done()
-    )
-    background_busy = (
-        state.task_manager is not None and state.task_manager.tasks_active()
-    )
+    foreground_busy = state.agent_task is not None and not state.agent_task.done()
+    background_busy = state.task_manager is not None and state.task_manager.tasks_active()
     return foreground_busy or background_busy

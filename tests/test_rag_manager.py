@@ -13,10 +13,7 @@ class FakeProvider:
         return True, 3
 
     def embed_texts(self, texts):
-        return [
-            [1.0, 0.0, 0.0] if "终端" in text else [0.0, 1.0, 0.0]
-            for text in texts
-        ]
+        return [[1.0, 0.0, 0.0] if "终端" in text else [0.0, 1.0, 0.0] for text in texts]
 
 
 def make_docs(tmp_path: Path) -> Path:
@@ -86,9 +83,7 @@ def test_enable_disable_source(tmp_path):
 
 def test_fingerprint_mismatch_marks_needs_reindex(tmp_path):
     root = make_docs(tmp_path)
-    RAGManager(tmp_path / ".rag", provider=FakeProvider()).add_source(
-        root, name="docs"
-    )
+    RAGManager(tmp_path / ".rag", provider=FakeProvider()).add_source(root, name="docs")
 
     class OtherProvider(FakeProvider):
         model = "other-embed"
@@ -111,14 +106,10 @@ def test_context_for_respects_min_score(tmp_path):
     manager = RAGManager(tmp_path / ".rag")
     manager.add_source(root, name="docs")
 
-    context = manager.context_for(
-        "完全不相关的内容", limit=5, max_chars=500, min_score=0.6
-    )
+    context = manager.context_for("完全不相关的内容", limit=5, max_chars=500, min_score=0.6)
     assert context == ""
 
-    context = manager.context_for(
-        "打开终端", limit=5, max_chars=500, min_score=0.1
-    )
+    context = manager.context_for("打开终端", limit=5, max_chars=500, min_score=0.1)
     assert "打开终端" in context
 
 

@@ -10,7 +10,7 @@ from .conftest import FakeBackend, FakeCapture
 from .test_agent import FakeOCR
 
 
-def build_agent(ocr=FakeOCR()):
+def build_agent(ocr=FakeOCR()):  # noqa: B008
     return Agent(
         client=None,
         backend=FakeBackend(size=(1920, 1080)),
@@ -46,9 +46,7 @@ def test_find_text_exact_matching():
     agent = build_agent()
 
     fuzzy = asyncio.run(agent._execute("find_text", {"text": "hel"}))
-    exact = asyncio.run(
-        agent._execute("find_text", {"text": "hel", "exact": True})
-    )
+    exact = asyncio.run(agent._execute("find_text", {"text": "hel", "exact": True}))
 
     assert fuzzy["found"] is True
     assert exact["found"] is False
@@ -89,9 +87,7 @@ def test_find_element_normalizes_to_center(monkeypatch):
 
 def test_find_element_not_found(monkeypatch):
     agent = build_agent()
-    monkeypatch.setattr(
-        "geass.io.accessibility.find_elements", lambda **kwargs: []
-    )
+    monkeypatch.setattr("geass.io.accessibility.find_elements", lambda **kwargs: [])
 
     result = asyncio.run(agent._execute("find_element", {"name": "不存在"}))
 
@@ -105,9 +101,7 @@ def test_find_element_unavailable_is_reported(monkeypatch):
     def raise_unavailable(**kwargs):
         raise AccessibilityError("AT-SPI 不可用")
 
-    monkeypatch.setattr(
-        "geass.io.accessibility.find_elements", raise_unavailable
-    )
+    monkeypatch.setattr("geass.io.accessibility.find_elements", raise_unavailable)
 
     result = asyncio.run(agent._execute("find_element", {"name": "保存"}))
 

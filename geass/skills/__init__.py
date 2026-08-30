@@ -18,6 +18,7 @@ frontmatter（`name` / `description` / 可选元数据）+ Markdown 正文：
 加载时只把「技能清单」注入系统提示；Agent 需要完整说明时再调用
 `read_skill`，实现渐进披露，避免把全部技能正文塞进上下文。
 """
+
 # 包化后的对外入口：保持 from geass.skills import load_skills 等兼容。
 from __future__ import annotations
 
@@ -30,9 +31,7 @@ from typing import Any
 
 SYSTEM_DIR = ".system"
 
-FRONTMATTER_RE = re.compile(
-    r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL
-)
+FRONTMATTER_RE = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)", re.DOTALL)
 
 
 @dataclass
@@ -101,9 +100,7 @@ def resolve_skills_dir(value: str | Path, config_path: str | Path | None = None)
     return path
 
 
-def resolve_skill_root(
-    value: str | Path | None, config_path: str | Path | None = None
-) -> Path:
+def resolve_skill_root(value: str | Path | None, config_path: str | Path | None = None) -> Path:
     """解析运行时 SKILL 根目录；留空时默认 ``~/.geass/.skill``。"""
     if value is None or str(value).strip() == "":
         home = Path(os.environ.get("GEASS_HOME", str(Path.home())))
@@ -121,9 +118,7 @@ def _load_skill_dir(skill_dir: Path) -> Skill | None:
         return None
     metadata, body = _parse_frontmatter(raw)
     name = str(metadata.get("name") or skill_dir.name).strip()
-    description = str(
-        metadata.get("description") or _first_paragraph(body) or name
-    ).strip()
+    description = str(metadata.get("description") or _first_paragraph(body) or name).strip()
     return Skill(
         name=name,
         description=description,
@@ -175,15 +170,9 @@ def load_skills(
     system_dir = root / SYSTEM_DIR
     directories: list[Path] = []
     if system_dir.is_dir():
-        directories.extend(
-            item
-            for item in sorted(system_dir.iterdir())
-            if item.is_dir()
-        )
+        directories.extend(item for item in sorted(system_dir.iterdir()) if item.is_dir())
     directories.extend(
-        item
-        for item in sorted(root.iterdir())
-        if item.is_dir() and item.name != SYSTEM_DIR
+        item for item in sorted(root.iterdir()) if item.is_dir() and item.name != SYSTEM_DIR
     )
 
     by_name: dict[str, Skill] = {}

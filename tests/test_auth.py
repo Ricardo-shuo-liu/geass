@@ -25,13 +25,9 @@ def test_info_requires_token():
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             denied = await client.get("/api/info")
-            allowed = await client.get(
-                "/api/info", headers={"X-GEASS-Token": TOKEN}
-            )
+            allowed = await client.get("/api/info", headers={"X-GEASS-Token": TOKEN})
             return denied.status_code, allowed.status_code, allowed.json()
 
     denied_code, allowed_code, body = asyncio.run(run())
@@ -45,9 +41,7 @@ def test_health_is_public():
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             response = await client.get("/api/health")
             return response.status_code, response.json()
 
@@ -61,13 +55,9 @@ def test_stop_agent_requires_token():
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             denied = await client.post("/api/agent/stop")
-            allowed = await client.post(
-                "/api/agent/stop", headers={"X-GEASS-Token": TOKEN}
-            )
+            allowed = await client.post("/api/agent/stop", headers={"X-GEASS-Token": TOKEN})
             return denied.status_code, allowed.status_code, allowed.json()
 
     denied_code, allowed_code, body = asyncio.run(run())
@@ -81,9 +71,7 @@ def test_transcribe_without_api_key_returns_503():
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             response = await client.post(
                 "/api/transcribe",
                 headers={"X-GEASS-Token": TOKEN},
@@ -140,9 +128,7 @@ def test_config_endpoint_updates_and_persists(monkeypatch, tmp_path):
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             headers = {"X-GEASS-Token": TOKEN}
             before = await client.get("/api/config", headers=headers)
             response = await client.post(
@@ -172,9 +158,7 @@ def test_config_endpoint_updates_security(monkeypatch, tmp_path):
 
     async def run():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://testserver"
-        ) as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             headers = {"X-GEASS-Token": TOKEN}
             before = await client.get("/api/config", headers=headers)
             response = await client.post(

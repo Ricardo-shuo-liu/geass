@@ -14,7 +14,7 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `security.enabled` | `true` | Manual review of high-risk shell commands |
 | `security.approval_timeout` | `30` | Seconds to wait for the phone's decision; timeout auto-denies (min 5s) |
 | `security.patterns` | empty | Custom blocklist regexes; empty uses the built-in list, non-empty replaces it |
-| `agent.model` | `gpt-5.6-terra` | Vision model (e.g. `sol` / `luna`) |
+| `agent.model` | `deepseek-v4-flash` | Agent model (any OpenAI-compatible model name) |
 | `agent.base_url` | empty | OpenAI-compatible endpoint; DeepSeek: `https://api.deepseek.com` |
 | `agent.vision` | `true` | Whether the model accepts images; non-vision models auto-degrade to text mode |
 | `agent.vision_whitelist` | empty | Whitelist of vision-capable models (comma-separated); when set, a model on the list gets screenshots, anything else is automatically paired with PaddleOCR |
@@ -24,6 +24,11 @@ Personal settings (including the API key) live in `~/.geass/env.toml` outside th
 | `agent.ocr_base_url` | `https://paddleocr.aistudio-app.com` | OCR jobs API endpoint |
 | `agent.ocr_timeout` | `90` | Seconds to wait for an OCR job (submit + poll) |
 | `agent.terminal_timeout` | `15` | Seconds `open_terminal` waits for a command's output |
+| `agent.model_max_retries` | `3` | Per-call retries for retryable model errors |
+| `agent.model_retry_base_delay` | `2.0` | Retry backoff base in seconds (×2 per attempt, capped at 60s) |
+| `agent.model_fail_limit` | `3` | Consecutive failed steps before aborting; below it, the error is fed back to the model |
+| `agent.ocr_retry_base_delay` | `5.0` | OCR probe cooldown base in seconds after failure (×2 per failure) |
+| `agent.ocr_retry_max_delay` | `120.0` | OCR probe cooldown cap in seconds |
 | `agent.skills_dir` | `skills` | Seed SKILL directory (relative to the project root), synced into `~/.geass/.skill/.system/` |
 | `agent.skill_root` | empty | Runtime SKILL root; defaults to `~/.geass/.skill` |
 | `agent.schedule_path` | empty | Scheduled-task directory; defaults to `~/.geass/.schedule` |
@@ -81,5 +86,5 @@ Environment variables:
 Precedence: **env vars > `~/.geass/env.toml` > `config.toml` > defaults**.
 
 - `GEASS_*` env vars used at startup are auto-saved to `~/.geass/env.toml` (mode 0600);
-- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; vision whitelist: `--vision-whitelist gpt-5.6-terra,sol`; memory: `--memory-enabled false` / `--memory-path ...`; skills & evolution: `--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`; safety: `--security-enabled false` / `--approval-timeout 60`;
+- CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; vision whitelist: `--vision-whitelist gpt-4o,deepseek-v4-flash`; memory: `--memory-enabled false` / `--memory-path ...`; skills & evolution: `--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`; safety: `--security-enabled false` / `--approval-timeout 60`;
 - Runtime API: `GET /api/config` (masked) and `POST /api/config` (e.g. `{"model":"...","base_url":"...","api_key":"...","vision":false}`) — applied and persisted immediately.

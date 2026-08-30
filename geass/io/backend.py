@@ -1,4 +1,5 @@
 """输入后端抽象：把归一化动作落到真实的键鼠操作。"""
+
 from __future__ import annotations
 
 import abc
@@ -42,40 +43,31 @@ _PASTE_KEYS = ("command", "v") if platform.system() == "Darwin" else ("ctrl", "v
 
 class InputBackend(abc.ABC):
     @abc.abstractmethod
-    def screen_size(self) -> tuple[int, int]:
-        ...
+    def screen_size(self) -> tuple[int, int]: ...
 
     @abc.abstractmethod
-    def move(self, x: int, y: int, duration: float = 0.08) -> None:
-        ...
+    def move(self, x: int, y: int, duration: float = 0.08) -> None: ...
 
     @abc.abstractmethod
-    def click(self, x: int, y: int, button: str = "left") -> None:
-        ...
+    def click(self, x: int, y: int, button: str = "left") -> None: ...
 
     @abc.abstractmethod
-    def double_click(self, x: int, y: int) -> None:
-        ...
+    def double_click(self, x: int, y: int) -> None: ...
 
     @abc.abstractmethod
-    def right_click(self, x: int, y: int) -> None:
-        ...
+    def right_click(self, x: int, y: int) -> None: ...
 
     @abc.abstractmethod
-    def scroll(self, dx: int, dy: int) -> None:
-        ...
+    def scroll(self, dx: int, dy: int) -> None: ...
 
     @abc.abstractmethod
-    def drag(self, x1: int, y1: int, x2: int, y2: int) -> None:
-        ...
+    def drag(self, x1: int, y1: int, x2: int, y2: int) -> None: ...
 
     @abc.abstractmethod
-    def type_text(self, text: str) -> None:
-        ...
+    def type_text(self, text: str) -> None: ...
 
     @abc.abstractmethod
-    def key_press(self, combo: str) -> None:
-        ...
+    def key_press(self, combo: str) -> None: ...
 
 
 class PyAutoGUIInputBackend(InputBackend):
@@ -92,9 +84,7 @@ class PyAutoGUIInputBackend(InputBackend):
             try:
                 import pyautogui
             except Exception as exc:
-                raise InputError(
-                    f"初始化 pyautogui 失败，可能没有可用的图形环境：{exc}"
-                ) from exc
+                raise InputError(f"初始化 pyautogui 失败，可能没有可用的图形环境：{exc}") from exc
 
             self._pg = pyautogui
             self._pg.PAUSE = self._pause

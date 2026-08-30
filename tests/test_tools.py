@@ -20,9 +20,7 @@ def build_agent(backend: FakeBackend) -> Agent:
 def test_click_maps_and_records():
     backend = FakeBackend(size=(1920, 1080))
     result = asyncio.run(
-        build_agent(backend)._execute(
-            "click", {"x": 0.5, "y": 0.5, "button": "right"}
-        )
+        build_agent(backend)._execute("click", {"x": 0.5, "y": 0.5, "button": "right"})
     )
     assert result["ok"] is True
     assert backend.calls == [("click", (960, 540, "right"), {})]
@@ -30,11 +28,7 @@ def test_click_maps_and_records():
 
 def test_drag_maps_both_points():
     backend = FakeBackend(size=(100, 100))
-    asyncio.run(
-        build_agent(backend)._execute(
-            "drag", {"x1": 0.1, "y1": 0.2, "x2": 0.9, "y2": 0.8}
-        )
-    )
+    asyncio.run(build_agent(backend)._execute("drag", {"x1": 0.1, "y1": 0.2, "x2": 0.9, "y2": 0.8}))
     assert backend.calls == [("drag", (10, 20, 90, 80), {})]
 
 

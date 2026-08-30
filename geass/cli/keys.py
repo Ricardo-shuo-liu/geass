@@ -1,4 +1,5 @@
 """跨平台终端按键捕获（方向键/回车/Esc），不依赖第三方库。"""
+
 from __future__ import annotations
 
 import os
@@ -68,9 +69,12 @@ def raw_mode(fd=None):
 def _read_windows_key() -> str | None:
     import msvcrt
 
-    first = msvcrt.getwch()
+    getwch = getattr(msvcrt, "getwch", None)
+    if getwch is None:
+        return None
+    first = getwch()
     if first in ("\x00", "\xe0"):
-        second = msvcrt.getwch()
+        second = getwch()
         mapping = {
             "H": "up",
             "P": "down",

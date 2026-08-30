@@ -1,4 +1,5 @@
 """后台任务管理器：独立 Agent 并发执行，键鼠动作通过全局输入锁串行。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -8,9 +9,10 @@ import os
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -94,15 +96,12 @@ class BackgroundTaskManager:
             self._save()
 
     def _save(self) -> None:
-        records = sorted(
-            self._tasks.values(), key=lambda task: task.created_at, reverse=True
-        )[:TASK_RECORD_LIMIT]
+        records = sorted(self._tasks.values(), key=lambda task: task.created_at, reverse=True)[
+            :TASK_RECORD_LIMIT
+        ]
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(
-            "\n".join(
-                json.dumps(task.to_dict(), ensure_ascii=False)
-                for task in records
-            )
+            "\n".join(json.dumps(task.to_dict(), ensure_ascii=False) for task in records)
             + ("\n" if records else ""),
             encoding="utf-8",
         )
@@ -154,9 +153,7 @@ class BackgroundTaskManager:
         )
         self._agents[task.id] = agent
         self._cancel_events[task.id] = asyncio.Event()
-        self._running_tasks[task.id] = asyncio.create_task(
-            self._run(task.id, agent, command)
-        )
+        self._running_tasks[task.id] = asyncio.create_task(self._run(task.id, agent, command))
         return {"ok": True, "task_id": task.id, "status": task.status}
 
     def _make_status_cb(self, task_id: str):
@@ -198,15 +195,10 @@ class BackgroundTaskManager:
         task.finished_at = time.time()
         self._save()
 
-        if (
-            self.state.evolution is not None
-            and getattr(agent, "last_trace", None) is not None
-        ):
+        if self.state.evolution is not None and getattr(agent, "last_trace", None) is not None:
             self.state.evolution.record_trace(agent.last_trace)
 
-        await self._make_status_cb(task_id)(
-            {"type": "agent_result", "task_id": task_id, **result}
-        )
+        await self._make_status_cb(task_id)({"type": "agent_result", "task_id": task_id, **result})
         self._cancel_events.pop(task_id, None)
         self._running_tasks.pop(task_id, None)
         self._agents.pop(task_id, None)

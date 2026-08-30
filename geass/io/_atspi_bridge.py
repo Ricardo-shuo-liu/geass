@@ -7,6 +7,7 @@ conda 环境通常无法加载发行版为系统 Python 编译的 gi/PyGObject C
 
 本文件不能 import Geass 包，必须保持对系统 Python 的完全独立性。
 """
+
 from __future__ import annotations
 
 import json
@@ -82,7 +83,7 @@ def main() -> None:
             seen.add(marker)
 
             try:
-                role_name = str(node.getRoleName() or "").casefold()
+                role_name = str(node.getRoleName() or "").casefold()  # type: ignore[attr-defined]
             except Exception:
                 role_name = ""
 
@@ -92,14 +93,10 @@ def main() -> None:
                 visible = False
                 x = y = w = h = 0
                 try:
-                    state = node.getState()
-                    active = bool(
-                        active_state and state.contains(active_state)
-                    )
-                    visible = bool(
-                        visible_state and state.contains(visible_state)
-                    )
-                    component = node.queryComponent()
+                    state = node.getState()  # type: ignore[attr-defined]
+                    active = bool(active_state and state.contains(active_state))
+                    visible = bool(visible_state and state.contains(visible_state))
+                    component = node.queryComponent()  # type: ignore[attr-defined]
                     extents = component.getExtents(desktop_coords)
                     x = int(getattr(extents, "x", 0))
                     y = int(getattr(extents, "y", 0))
@@ -124,14 +121,14 @@ def main() -> None:
                         return
 
             try:
-                child_count = int(node.childCount)
+                child_count = int(node.childCount)  # type: ignore[attr-defined]
             except Exception:
                 return
             for index in range(child_count):
                 if len(windows) >= limit or time.monotonic() >= deadline:
                     return
                 try:
-                    child = node.getChildAtIndex(index)
+                    child = node.getChildAtIndex(index)  # type: ignore[attr-defined]
                 except Exception:
                     continue
                 if child is not None:
@@ -142,11 +139,7 @@ def main() -> None:
         except Exception as exc:
             print(json.dumps({"ok": False, "error": f"遍历窗口失败：{exc}"}))
             return
-        print(
-            json.dumps(
-                {"ok": True, "windows": windows[:limit]}, ensure_ascii=False
-            )
-        )
+        print(json.dumps({"ok": True, "windows": windows[:limit]}, ensure_ascii=False))
         return
 
     query = str(args.get("name") or "").strip()
@@ -171,7 +164,7 @@ def main() -> None:
         return
 
     matches: list[dict[str, object]] = []
-    seen: set[int] = set()
+    seen_nodes: set[int] = set()
     deadline = time.monotonic() + timeout
     role_needle = role.casefold()
     name_needle = query.casefold()
@@ -181,13 +174,13 @@ def main() -> None:
         if len(matches) >= limit or time.monotonic() >= deadline:
             return
         marker = id(node)
-        if marker in seen:
+        if marker in seen_nodes:
             return
-        seen.add(marker)
+        seen_nodes.add(marker)
 
         try:
             node_name = str(getattr(node, "name", "") or "")
-            node_role = str(node.getRoleName() or "")
+            node_role = str(node.getRoleName() or "")  # type: ignore[attr-defined]
         except Exception:
             node_name = ""
             node_role = ""
@@ -195,7 +188,7 @@ def main() -> None:
         if node_name and name_needle in node_name.casefold():
             if not role_needle or role_needle in node_role.casefold():
                 try:
-                    component = node.queryComponent()
+                    component = node.queryComponent()  # type: ignore[attr-defined]
                     extents = component.getExtents(desktop_coords)
                     x = int(getattr(extents, "x", 0))
                     y = int(getattr(extents, "y", 0))
@@ -216,14 +209,14 @@ def main() -> None:
                     pass
 
         try:
-            child_count = int(node.childCount)
+            child_count = int(node.childCount)  # type: ignore[attr-defined]
         except Exception:
             return
         for index in range(child_count):
             if len(matches) >= limit or time.monotonic() >= deadline:
                 return
             try:
-                child = node.getChildAtIndex(index)
+                child = node.getChildAtIndex(index)  # type: ignore[attr-defined]
             except Exception:
                 continue
             if child is not None:

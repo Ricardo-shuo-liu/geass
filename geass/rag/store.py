@@ -1,4 +1,5 @@
 """RAG 存储：来源元数据、同名镜像分块文件与原子写入。"""
+
 from __future__ import annotations
 
 import json
@@ -31,7 +32,7 @@ class SourceMeta:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SourceMeta":
+    def from_dict(cls, data: dict[str, Any]) -> SourceMeta:
         return cls(
             id=str(data.get("id") or ""),
             name=str(data.get("name") or ""),

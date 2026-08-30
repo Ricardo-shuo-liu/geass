@@ -1,8 +1,9 @@
 """数据源扫描、过滤与分块。"""
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 DEFAULT_EXTS = {
     ".md",
@@ -94,7 +95,6 @@ def chunk_text(
 
     chunks: list[str] = []
     start = 0
-    step = max(1, size - overlap)
     while start < len(text):
         end = min(len(text), start + size)
         if end < len(text):

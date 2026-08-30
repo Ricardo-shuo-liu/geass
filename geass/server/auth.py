@@ -1,4 +1,5 @@
 """Token 校验。"""
+
 from __future__ import annotations
 
 import hmac

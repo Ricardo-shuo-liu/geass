@@ -1,4 +1,5 @@
 """Geass 统一命令入口：geass [serve|cli|rag|config|check|pot|reset|commands|help]。"""
+
 from __future__ import annotations
 
 import argparse

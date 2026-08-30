@@ -7,6 +7,7 @@
 依赖可选的 ``pyatspi``（以及运行中的 AT-SPI 总线）；缺失时抛出
 ``AccessibilityError``，调用方应把它当作普通工具错误回填给模型。
 """
+
 from __future__ import annotations
 
 import json
@@ -53,9 +54,7 @@ def _load_pyatspi() -> Any:
         return pyatspi
     except ImportError as exc:
         if getattr(exc, "name", None) != "pyatspi":
-            raise AccessibilityError(
-                f"pyatspi 依赖缺失：{exc}", bridge_fallback=True
-            ) from exc
+            raise AccessibilityError(f"pyatspi 依赖缺失：{exc}", bridge_fallback=True) from exc
 
     added_paths: list[str] = []
     for path in _SYSTEM_PYTHON_PATHS:
@@ -102,10 +101,7 @@ def _system_python() -> str:
     for candidate in _SYSTEM_PYTHON_CANDIDATES:
         if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    raise AccessibilityError(
-        "找不到系统 Python，无法运行 AT-SPI 桥接；"
-        "请确认系统已安装 python3"
-    )
+    raise AccessibilityError("找不到系统 Python，无法运行 AT-SPI 桥接；请确认系统已安装 python3")
 
 
 def _run_bridge(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
@@ -143,8 +139,8 @@ def _run_bridge(payload: dict[str, Any], timeout: float) -> dict[str, Any]:
     except (TypeError, json.JSONDecodeError) as exc:
         raise AccessibilityError(f"AT-SPI 桥接返回无效数据：{exc}") from exc
     if not isinstance(result, dict) or not result.get("ok"):
-        detail = result.get("error") if isinstance(result, dict) else "未知错误"
-        raise AccessibilityError(f"AT-SPI 桥接查询失败：{detail}")
+        reason = result.get("error") if isinstance(result, dict) else "未知错误"
+        raise AccessibilityError(f"AT-SPI 桥接查询失败：{reason}")
     return result
 
 
@@ -166,11 +162,7 @@ def _find_via_bridge(
     matches = result.get("matches")
     if not isinstance(matches, list):
         return []
-    return [
-        item
-        for item in matches
-        if isinstance(item, dict) and "name" in item
-    ]
+    return [item for item in matches if isinstance(item, dict) and "name" in item]
 
 
 def _list_windows_via_bridge(limit: int, timeout: float) -> list[dict[str, Any]]:
@@ -185,11 +177,7 @@ def _list_windows_via_bridge(limit: int, timeout: float) -> list[dict[str, Any]]
     windows = result.get("windows")
     if not isinstance(windows, list):
         return []
-    return [
-        item
-        for item in windows
-        if isinstance(item, dict) and "name" in item
-    ]
+    return [item for item in windows if isinstance(item, dict) and "name" in item]
 
 
 def find_elements(
@@ -292,9 +280,7 @@ def list_windows(limit: int = 50, timeout: float = 5.0) -> list[dict[str, Any]]:
         pyatspi = _load_pyatspi()
     except AccessibilityError as exc:
         if exc.bridge_fallback:
-            return _list_windows_via_bridge(
-                max(1, min(int(limit), 100)), float(timeout)
-            )
+            return _list_windows_via_bridge(max(1, min(int(limit), 100)), float(timeout))
         raise
 
     try:

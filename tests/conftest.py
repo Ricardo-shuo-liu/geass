@@ -79,9 +79,7 @@ class FakeChoice:
 
 
 class FakeResponse:
-    def __init__(
-        self, message: FakeMessage | None = None, content: str = ""
-    ) -> None:
+    def __init__(self, message: FakeMessage | None = None, content: str = "") -> None:
         if message is None:
             message = FakeMessage(content=content)
         self.choices = [FakeChoice(message)]
