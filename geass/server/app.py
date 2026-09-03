@@ -47,6 +47,8 @@ def create_app(state: AppState) -> FastAPI:
                 await streamer_task
             except asyncio.CancelledError:
                 pass
+            if state.mcp is not None:
+                await state.mcp.aclose()
             try:
                 state.terminal_manager.close_all()
             except Exception:

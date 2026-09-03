@@ -12,10 +12,11 @@
 - [手动直控（虚拟键鼠）](manual-control.md)：触屏、虚拟鼠标触摸板、虚拟键盘与手势
 - [定时任务](schedule.md)：指定时间执行指定命令，持久化与状态推送
 - [RAG 数据源检索](rag.md)：锁定本地文件/文件夹、向量/词法检索、数据源管理
+- [MCP 工具接口](mcp.md)：导入/测试/管理外部 MCP 工具，UI 与命令行双入口
 - [POT 反思系统](pot.md)：Global-COT 与角色 ROT 模板、空闲反思
 - [CLI 终端助手](cli-assistant.md)：light/deliberate 双模式，复用全部资产
 - [命令行](cli.md)：统一命令入口、全命令查看、双确认重置
-- [资源管理（手机端）](resources.md)：记忆/RAG/技能/POT/定时可视化管理
+- [资源管理（手机端）](resources.md)：记忆/MCP/RAG/技能/POT/定时可视化管理
 - [配置说明](configuration.md)：配置优先级、环境变量、CLI 与运行时接口
 - [项目结构与开发](development.md)：模块结构、开发测试、已知限制
 

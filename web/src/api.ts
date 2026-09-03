@@ -1,6 +1,6 @@
 const TOKEN_HEADER = 'X-GEASS-Token';
 
-import type { ResourceSummary } from './types';
+import type { McpAddInput, McpServerResource, ResourceSummary } from './types';
 
 export async function apiInfo(token: string): Promise<unknown> {
   const res = await fetch('/api/info', { headers: { [TOKEN_HEADER]: token } });
@@ -214,4 +214,95 @@ export async function removeBackgroundTask(
     headers: { [TOKEN_HEADER]: token },
   });
   if (!res.ok) throw new Error(`删除后台任务失败（HTTP ${res.status}）`);
+}
+
+async function parseDetail(res: Response): Promise<Error> {
+  try {
+    const body = (await res.json()) as { detail?: string };
+    if (body.detail) return new Error(body.detail);
+  } catch {
+    // fall through to HTTP status message
+  }
+  return new Error(`MCP 请求失败（HTTP ${res.status}）`);
+}
+
+export async function addMcpServer(
+  token: string,
+  input: McpAddInput,
+): Promise<{ record: McpServerResource }> {
+  const res = await fetch('/api/resources/mcp', {
+    method: 'POST',
+    headers: {
+      [TOKEN_HEADER]: token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw await parseDetail(res);
+  return (await res.json()) as { record: McpServerResource };
+}
+
+export async function testMcpServer(
+  token: string,
+  name: string,
+): Promise<{ record: McpServerResource }> {
+  const res = await fetch(
+    `/api/resources/mcp/${encodeURIComponent(name)}/test`,
+    {
+      method: 'POST',
+      headers: { [TOKEN_HEADER]: token },
+    },
+  );
+  if (!res.ok) throw await parseDetail(res);
+  return (await res.json()) as { record: McpServerResource };
+}
+
+export async function setMcpServerEnabled(
+  token: string,
+  name: string,
+  enabled: boolean,
+): Promise<void> {
+  const res = await fetch(
+    `/api/resources/mcp/${encodeURIComponent(name)}/enabled`,
+    {
+      method: 'POST',
+      headers: {
+        [TOKEN_HEADER]: token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!res.ok) throw await parseDetail(res);
+}
+
+export async function setMcpToolEnabled(
+  token: string,
+  name: string,
+  toolId: string,
+  enabled: boolean,
+): Promise<void> {
+  const res = await fetch(
+    `/api/resources/mcp/${encodeURIComponent(name)}/tools/${encodeURIComponent(toolId)}/enabled`,
+    {
+      method: 'POST',
+      headers: {
+        [TOKEN_HEADER]: token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+  if (!res.ok) throw await parseDetail(res);
+}
+
+export async function deleteMcpServer(
+  token: string,
+  name: string,
+): Promise<void> {
+  const res = await fetch(`/api/resources/mcp/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { [TOKEN_HEADER]: token },
+  });
+  if (!res.ok) throw await parseDetail(res);
 }

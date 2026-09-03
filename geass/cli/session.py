@@ -89,6 +89,7 @@ class CILSession:
         rag: Any = None,
         skills: list | None = None,
         pot: Any = None,
+        mcp: Any = None,
         tui: TUI | None = None,
     ) -> None:
         self.client = client
@@ -97,6 +98,7 @@ class CILSession:
         self.rag = rag
         self.skills = list(skills or [])
         self.pot = pot
+        self.mcp = mcp
         self.tui = tui or TUI()
         self.mode = "light"
         self.history: list[dict[str, Any]] = []
@@ -174,7 +176,10 @@ class CILSession:
             *self.history[-12:],
             {"role": "user", "content": text},
         ]
-        tools = [{"type": "function", "function": tool} for tool in CIL_TOOLS] if tool_use else None
+        base_tools = [{"type": "function", "function": tool} for tool in CIL_TOOLS]
+        if tool_use and self.mcp is not None:
+            base_tools.extend({"type": "function", "function": tool} for tool in self.mcp.schemas())
+        tools = base_tools if tool_use else None
         answer = ""
         for _ in range(8):
             response = await self.client.chat.completions.create(
@@ -223,6 +228,10 @@ class CILSession:
         return answer
 
     async def _execute_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if self.mcp is not None:
+            result = await self.mcp.call(name, args)
+            if result is not None:
+                return result
         if name == "recall":
             if self.memory is None:
                 return {"ok": False, "error": "记忆未启用"}
@@ -350,7 +359,8 @@ class CILSession:
             self.tui.say(
                 "CIL",
                 "/help /mode /deliberate /light /rot list|use <name> "
-                "/skill list|read <name> /rag search <query> /cot show /clear /exit",
+                "/skill list|read <name> /rag search <query> /mcp list "
+                "/cot show /clear /exit",
             )
         elif name == "/mode":
             self.tui.say("CIL", self.tui._status_text())
@@ -371,6 +381,22 @@ class CILSession:
                 await self._chat(rest[len("search ") :], tool_use=False)
             else:
                 self.tui.say("CIL", "用法：/rag search <query>")
+        elif name == "/mcp":
+            if self.mcp is None:
+                self.tui.say("CIL", "MCP 未启用")
+            elif not rest or rest == "list":
+                records = self.mcp.servers()
+                for record in records:
+                    status = "启用" if record.enabled else "停用"
+                    verified = "已测试" if record.verified else "测试失败"
+                    self.tui.say(
+                        "MCP",
+                        f"{record.name} [{status}/{verified}] · {len(record.tools)} 个工具",
+                    )
+                if not records:
+                    self.tui.say("MCP", "暂无服务器（用 geass mcp add/import 添加）")
+            else:
+                self.tui.say("CIL", "用法：/mcp list")
         elif name == "/cot":
             cot = self.pot.get_cot() if self.pot is not None else ""
             self.tui.say("Global-COT", cot or "（暂无 COT）")

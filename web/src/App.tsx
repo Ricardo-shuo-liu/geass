@@ -99,6 +99,11 @@ export default function App() {
   const [manualOpen, setManualOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
+  // 清理旧版本可能遗留的本地 Token；当前版本只保存在内存中，刷新页面后必须重新输入。
+  useEffect(() => {
+    localStorage.removeItem(TOKEN_KEY);
+  }, []);
+
   const controlRef = useRef<WebSocket | null>(null);
   const voiceRecRef = useRef<unknown>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);

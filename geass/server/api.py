@@ -48,6 +48,17 @@ class RAGAdd(BaseModel):
     extensions: str | None = None
 
 
+class MCPImport(BaseModel):
+    name: str
+    transport: str = "stdio"
+    command: str | None = None
+    args: list[str] = []
+    cwd: str | None = None
+    env: dict[str, str] = {}
+    url: str | None = None
+    headers: dict[str, str] = {}
+
+
 class EnabledUpdate(BaseModel):
     enabled: bool
 
@@ -253,6 +264,7 @@ def register(app) -> None:
             if state.schedule_store is not None
             else []
         )
+        mcp_servers = state.mcp.list_summary() if state.mcp is not None else []
         return {
             "memory": {
                 "enabled": state.memory is not None,
@@ -271,7 +283,95 @@ def register(app) -> None:
                 if state.task_manager is not None
                 else {"enabled": False, "max": 0, "tasks": []}
             ),
+            "mcp": {"enabled": state.mcp is not None, "servers": mcp_servers},
         }
+
+    @router.get("/api/resources/mcp", dependencies=[Depends(require_token)])
+    async def list_mcp_servers(request: Request):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        return {"servers": state.mcp.list_public()}
+
+    @router.post("/api/resources/mcp", dependencies=[Depends(require_token)])
+    async def add_mcp_server(request: Request, payload: MCPImport):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        kwargs: dict[str, Any] = {
+            "command": payload.command or "",
+            "args": list(payload.args),
+            "cwd": payload.cwd or "",
+            "env": dict(payload.env),
+            "url": payload.url or "",
+            "headers": dict(payload.headers),
+        }
+        try:
+            record = await state.mcp.add_and_test(payload.name, payload.transport, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"record": record.public_dict()}
+
+    @router.post("/api/resources/mcp/{name}/test", dependencies=[Depends(require_token)])
+    async def test_mcp_server(request: Request, name: str):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        try:
+            record = await state.mcp.test(name)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"record": record.public_dict()}
+
+    @router.post(
+        "/api/resources/mcp/{name}/enabled",
+        dependencies=[Depends(require_token)],
+    )
+    async def set_mcp_server_enabled(
+        request: Request,
+        name: str,
+        payload: EnabledUpdate,
+    ):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        record = state.mcp.get(name)
+        if record is None:
+            raise HTTPException(status_code=404, detail="MCP 服务器不存在")
+        if payload.enabled and not record.verified:
+            raise HTTPException(status_code=409, detail="服务器未通过测试，不能启用")
+        if not await state.mcp.set_enabled_async(name, payload.enabled):
+            raise HTTPException(status_code=404, detail="MCP 服务器不存在")
+        return {"ok": True}
+
+    @router.post(
+        "/api/resources/mcp/{name}/tools/{tool_id}/enabled",
+        dependencies=[Depends(require_token)],
+    )
+    async def set_mcp_tool_enabled(
+        request: Request,
+        name: str,
+        tool_id: str,
+        payload: EnabledUpdate,
+    ):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        if not state.mcp.set_tool_enabled(name, tool_id, payload.enabled):
+            raise HTTPException(status_code=404, detail="MCP 服务器或工具不存在")
+        return {"ok": True}
+
+    @router.delete(
+        "/api/resources/mcp/{name}",
+        dependencies=[Depends(require_token)],
+    )
+    async def delete_mcp_server(request: Request, name: str):
+        state = request.app.state.geass
+        if state.mcp is None:
+            raise HTTPException(status_code=503, detail="MCP 未启用")
+        if not await state.mcp.remove_async(name):
+            raise HTTPException(status_code=404, detail="MCP 服务器不存在")
+        return {"ok": True, "removed": name}
 
     @router.get("/api/resources/memory", dependencies=[Depends(require_token)])
     async def list_memory(request: Request):

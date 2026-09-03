@@ -14,6 +14,7 @@ from ..config import Config, save_user_env
 from ..evolution import EvolutionEngine, POTStore
 from ..io.backend import InputBackend, PyAutoGUIInputBackend
 from ..io.terminal import TerminalManager
+from ..mcp import MCPManager
 from ..memory import Memory
 from ..ocr import PaddleOCRBackend
 from ..rag import RAGManager
@@ -38,6 +39,7 @@ class AppState:
     backend: InputBackend
     agent: Agent
     client: AsyncOpenAI | None
+    mcp: MCPManager | None = None
     terminal_manager: TerminalManager = field(default_factory=TerminalManager)
     skills: list = field(default_factory=list)
     skill_source_dir: Any = None
@@ -121,6 +123,7 @@ def build_state(config: Config) -> AppState:
         backend=backend,
         agent=None,  # type: ignore[arg-type]
         client=client,
+        mcp=MCPManager(),
         terminal_manager=terminal_manager,
         skills=skills,
         skill_source_dir=skill_source_dir,
@@ -298,6 +301,7 @@ def make_agent(state: AppState, status_cb=None) -> Agent:
         schedule_store=state.schedule_store,
         rag=state.rag,
         pot=state.pot,
+        mcp=state.mcp,
         input_lock=state.input_lock,
         background_starter=(state.task_manager.start if state.task_manager is not None else None),
     )

@@ -6,6 +6,7 @@ The **资源** button in the phone top bar opens the resource panel for managing
 all runtime assets used by the Agent:
 
 - **Memory**: view entries, delete one, clear all;
+- **MCP**: import via stdio/HTTP forms or JSON, auto connection test, per-server/per-tool toggles, permanent delete;
 - **RAG**: add/remove sources, enable/disable, reindex;
 - **Skills**: view runtime SKILLs (system/evolved badges), delete;
 - **POT**: view Global-COT, enable/disable/delete ROTs;

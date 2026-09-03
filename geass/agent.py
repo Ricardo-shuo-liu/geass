@@ -21,6 +21,7 @@ from .config import AgentConfig, SecurityConfig
 from .io.backend import InputBackend, InputError
 from .io.browser import BrowserError
 from .io.terminal import TerminalError, TerminalManager
+from .mcp import MCPManager
 from .memory import Memory
 from .safety import UNTRUSTED_BEGIN, UNTRUSTED_END
 from .screen import ScreenCapture, image_difference
@@ -162,6 +163,7 @@ class Agent:
         input_lock: Any = None,
         background_starter: Any = None,
         compression_path: str | None = None,
+        mcp: MCPManager | None = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -189,6 +191,7 @@ class Agent:
         self.input_lock = input_lock
         self.background_starter = background_starter
         self.compression_path = compression_path
+        self.mcp = mcp
         self._compress_watermark = 1
 
     def resolve_vision(self) -> bool:
@@ -232,6 +235,10 @@ class Agent:
         return round(cx * width), round(cy * height)
 
     async def _execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if self.mcp is not None:
+            result = await self.mcp.call(name, args)
+            if result is not None:
+                return result
         tool = TOOL_REGISTRY.get(name)
         if tool is None:
             return {"ok": False, "error": f"未知工具：{name}"}
@@ -948,6 +955,8 @@ class Agent:
             source = [tool for tool in TOOLS if tool["name"] in TEXT_ONLY_TOOLS]
         if self.memory is None:
             source = [tool for tool in source if tool["name"] not in MEMORY_TOOL_NAMES]
+        if self.mcp is not None:
+            source = [*source, *self.mcp.schemas()]
         # Chat Completions / DeepSeek 要求 function 字段嵌套：
         # {"type":"function","function":{"name":...,"description":...,"parameters":...}}
         return [

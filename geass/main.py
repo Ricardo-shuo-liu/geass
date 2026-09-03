@@ -74,6 +74,8 @@ def main() -> None:
     print(f"  手机访问:  http://{host_label}:{config.server.port}")
     print(f"  访问 Token: {config.server.token}")
     print(f"  Agent 模型: {config.agent.model}")
+    if state.mcp is not None:
+        print("  MCP 管理:   手机资源面板「MCP」页签 / 终端 `geass mcp` 命令")
     if config.agent.base_url:
         print(f"  接口地址:  {config.agent.base_url}")
     for ip in lan_ips():

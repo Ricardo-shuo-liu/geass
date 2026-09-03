@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { apiInfo, stopAgent, transcribe } from './api';
+import {
+  addMcpServer,
+  apiInfo,
+  deleteMcpServer,
+  setMcpToolEnabled,
+  stopAgent,
+  testMcpServer,
+  transcribe,
+} from './api';
 
 interface FetchResponse {
   ok: boolean;
@@ -69,5 +77,57 @@ describe('api', () => {
     stubFetch({ ok: false, status: 502, text: async () => '转写服务不可用' });
 
     await expect(transcribe('tok', new Blob())).rejects.toThrow('转写服务不可用');
+  });
+
+  it('adds an MCP server with a JSON body', async () => {
+    const fetchMock = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ record: { verified: true } }),
+    });
+
+    await addMcpServer('tok', {
+      name: 'demo',
+      transport: 'stdio',
+      command: 'echo',
+      env: { TOKEN: 'secret' },
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+
+    expect(url).toBe('/api/resources/mcp');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      name: 'demo',
+      transport: 'stdio',
+      command: 'echo',
+      env: { TOKEN: 'secret' },
+    });
+  });
+
+  it('tests, toggles and deletes an MCP server', async () => {
+    const fetchMock = stubFetch({ ok: true, status: 200, json: async () => ({ ok: true }) });
+
+    await testMcpServer('tok', 'demo');
+    await setMcpToolEnabled('tok', 'demo', 'add', false);
+    await deleteMcpServer('tok', 'demo');
+
+    const urls = fetchMock.mock.calls.map((call) => call[0]);
+    expect(urls[0]).toBe('/api/resources/mcp/demo/test');
+    expect(urls[1]).toBe('/api/resources/mcp/demo/tools/add/enabled');
+    expect(urls[2]).toBe('/api/resources/mcp/demo');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
+    expect(fetchMock.mock.calls[2][1]?.method).toBe('DELETE');
+  });
+
+  it('surfaces MCP detail errors from the server', async () => {
+    stubFetch({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: '服务器未通过测试，不能启用' }),
+    });
+
+    await expect(testMcpServer('tok', 'broken')).rejects.toThrow(
+      '服务器未通过测试，不能启用',
+    );
   });
 });

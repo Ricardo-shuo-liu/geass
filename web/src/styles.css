@@ -768,6 +768,21 @@ button:disabled {
   border-radius: 10px;
 }
 
+.resource-server {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.resource-server > .resource-item {
+  border: none;
+  background: transparent;
+}
+
 .resource-item-main {
   display: flex;
   flex-direction: column;
@@ -829,7 +844,9 @@ button:disabled {
   margin-bottom: 8px;
 }
 
-.resource-form input {
+.resource-form input,
+.resource-form textarea,
+.resource-form select {
   font: inherit;
   font-size: 13px;
   padding: 8px 9px;
@@ -838,6 +855,8 @@ button:disabled {
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
+  resize: vertical;
+  min-height: 38px;
 }
 
 .resource-add {

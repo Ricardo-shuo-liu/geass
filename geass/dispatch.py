@@ -14,6 +14,7 @@ COMMANDS = {
     "rag": "管理 RAG 数据源（add/list/remove/enable/disable/reindex）",
     "config": "查看/修改配置（python -m geass.config 的别名）",
     "check": "环境自检",
+    "mcp": "管理 MCP 工具服务器（add/import/list/test/enable/disable/remove）",
     "pot": "管理 POT 反思产物（COT/ROT）",
     "reset": "重置全部运行数据与用户配置（需要两次确认）",
     "commands": "列出全部命令与说明",
@@ -27,7 +28,7 @@ def geass_home() -> Path:
 
 def reset_main() -> None:
     home_dir = geass_home() / ".geass"
-    targets = [".memory", ".skill", ".rag", ".schedule", ".pot"]
+    targets = [".memory", ".skill", ".rag", ".schedule", ".pot", ".mcp"]
     print("即将删除以下内容（原始文件与仓库文件不受影响）：")
     for name in targets:
         print(f"  - {home_dir / name}")
@@ -99,6 +100,12 @@ def main(argv: list[str] | None = None) -> None:
 
         sys.argv = [sys.argv[0], *remaining]
         pot_main()
+        return
+    if command == "mcp":
+        from .mcp.__main__ import main as mcp_main
+
+        sys.argv = [sys.argv[0], *remaining]
+        mcp_main()
         return
     if command == "reset":
         reset_main()

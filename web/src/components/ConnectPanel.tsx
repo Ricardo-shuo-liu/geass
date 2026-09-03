@@ -26,7 +26,10 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
             onChange={(event) => setToken(event.target.value)}
             placeholder="Token"
             autoFocus
-            autoComplete="off"
+            autoComplete="one-time-code"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
           />
           <button
             type="button"

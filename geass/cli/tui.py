@@ -20,6 +20,7 @@ SLASH_COMMANDS = [
     "/skill list",
     "/skill read ",
     "/rag search ",
+    "/mcp list",
     "/cot show",
     "/clear",
     "/exit",

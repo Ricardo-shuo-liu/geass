@@ -8,6 +8,7 @@ from openai import AsyncOpenAI
 
 from ..config import load_config
 from ..evolution import POTStore
+from ..mcp import MCPManager
 from ..memory import Memory
 from ..rag import RAGManager
 from ..rag.embeddings import provider_from_config
@@ -42,6 +43,7 @@ def main() -> None:
         else None
     )
     pot = POTStore(config.agent.pot_path or None) if config.agent.pot_enabled else None
+    mcp = MCPManager()
 
     def make_session() -> CILSession:
         return CILSession(
@@ -49,6 +51,7 @@ def main() -> None:
             config=config.agent,
             memory=memory,
             rag=rag,
+            mcp=mcp,
             skills=skills,
             pot=pot,
             tui=TUI(),
@@ -69,6 +72,17 @@ def main() -> None:
                         f"- {source['name']} [{source['mode']}] "
                         f"{source['files']} 文件 / {source['chunks']} 分块"
                     )
+        elif action == "mcp":
+            records = mcp.servers()
+            if not records:
+                print("暂无 MCP 工具（可执行 geass mcp add/import 添加）")
+            for record in records:
+                status = "启用" if record.enabled else "停用"
+                verified = "已测试" if record.verified else "测试失败"
+                print(
+                    f"- {record.name} [{status}/{verified}] "
+                    f"{record.transport} · {len(record.tools)} 个工具"
+                )
         elif action == "pot":
             if pot is None:
                 print("POT 未启用")

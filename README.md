@@ -21,10 +21,11 @@ codenamed **Paisley-Park**.
 - Manual direct control: touch screen plus virtual mouse touchpad and keyboard rendered in the PWA, no model in the loop
 - Scheduled tasks: created conversationally from temporal prompts; long-term jobs persist after user confirmation
 - RAG retrieval: register local files/folders as sources with vector or local lexical search injected into tasks
+- MCP tools: import stdio or Streamable HTTP tools from the UI or CLI, auto-test on import, and manage each server/tool independently
 - POT reflection: distills a Global-COT and role ROT templates from task traces
 - CIL terminal assistant: GUI-independent light/deliberate modes reusing all assets
-- Unified CLI: `geass serve/cli/rag/config/check/pot/reset/commands`
-- Phone resource manager: visual management of memory, RAG, SKILLs, POT and scheduled tasks
+- Unified CLI: `geass serve/cli/rag/mcp/config/check/pot/reset/commands`
+- Phone resource manager: visual management of memory, MCP, RAG, SKILLs, POT and scheduled tasks
 - Background tasks: run in parallel with the foreground agent (GUI actions serialized by a global input lock)
 - Context compression: long tasks auto-summarize early messages with originals archived
 - Visible terminal: one-shot commands, streamed input, output monitoring

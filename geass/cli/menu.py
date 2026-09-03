@@ -45,6 +45,7 @@ def default_menu_items() -> list[MenuItem]:
         MenuItem("group", "资产"),
         MenuItem("option", "查看 SKILL 技能", "skills", "📚"),
         MenuItem("option", "查看 RAG 数据源", "rag", "🗂️"),
+        MenuItem("option", "查看 MCP 工具", "mcp", "🔌"),
         MenuItem("option", "查看 POT（COT/ROT）", "pot", "🪄"),
         MenuItem("option", "查看持久记忆", "memory", "🧾"),
         MenuItem("group", "Configuration"),

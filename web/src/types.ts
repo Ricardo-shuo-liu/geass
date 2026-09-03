@@ -173,6 +173,31 @@ export interface BackgroundTaskResource {
   result?: { state?: string; message?: string };
 }
 
+export interface McpToolResource {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  input_schema?: Record<string, unknown>;
+}
+
+export interface McpServerResource {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'http';
+  enabled: boolean;
+  verified: boolean;
+  last_test_at?: number | null;
+  last_error?: string | null;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  url?: string;
+  env_keys?: string[];
+  header_keys?: string[];
+  tools: McpToolResource[];
+}
+
 export interface ResourceSummary {
   memory: { enabled: boolean; entries: MemoryEntryResource[] };
   rag: { enabled: boolean; sources: RagSourceResource[] };
@@ -184,4 +209,16 @@ export interface ResourceSummary {
     max: number;
     tasks: BackgroundTaskResource[];
   };
+  mcp: { enabled: boolean; servers: McpServerResource[] };
+}
+
+export interface McpAddInput {
+  name: string;
+  transport: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 }
