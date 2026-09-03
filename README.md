@@ -11,6 +11,11 @@ phone PWA into the remote control, with live screen streaming plus text, voice
 and direct manual input. The command/agent/action orchestration layer is
 codenamed **Paisley-Park**.
 
+> **Status**: functional MVP. Current platform and precision limitations are
+> documented honestly in
+> [Known issues & capability boundaries](docs/en/known-issues.md) — read before
+> relying on it.
+
 ## Features
 
 - Live screen streaming and remote access (Tailscale / Cloudflare quick tunnel)
@@ -85,3 +90,4 @@ Token. From a different network, run in another terminal:
 - [中文详细文档](docs/zh/index.md)
 - [Design and roadmap](docs/DESIGN.md)
 - [SKILL authoring guide](skills/README.md)
+- [Known issues & capability boundaries](docs/en/known-issues.md): current limitations by functional area

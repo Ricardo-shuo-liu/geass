@@ -19,6 +19,7 @@
 - [资源管理（手机端）](resources.md)：记忆/MCP/RAG/技能/POT/定时可视化管理
 - [配置说明](configuration.md)：配置优先级、环境变量、CLI 与运行时接口
 - [项目结构与开发](development.md)：模块结构、开发测试、已知限制
+- [已知问题与功能边界](known-issues.md)：按功能域整理的代码现状问题、能力粒度与限制
 
 ## 相关文档
 

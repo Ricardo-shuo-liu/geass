@@ -310,6 +310,11 @@ RAG：`agent.rag_enabled`（默认 true）、`agent.rag_inject_enabled`（默认
 - 手动直控代表用户本人操作，因此绕过 `open_terminal` 审核与 Agent 步数
   上限；该通道仍受同一 Token 认证保护。
 
+按功能域展开的代码现状问题与限制（2026-09 评审）见
+[已知问题与功能边界](zh/known-issues.md) /
+[Known issues & capability boundaries](en/known-issues.md)，
+作为路线图与实现排期的输入。
+
 ## 13. 测试与验收
 
 - 单元：坐标换算、工具映射、pyautogui 后端（中文粘贴、按键别名、异常包装）、语义定位（find_text/find_element 与 AT-SPI 遍历）、配置加载、帧编解码、前后帧差异检测、SKILL 种子同步与运行时加载、OCR 远程 jobs 协议解析与转写、终端输出清洗、黑名单匹配与审核网关的允许/拒绝/超时/先到先决、环境自检、任务计划解析与渲染、记忆读写/检索/持久化/容量上限、进化引擎的空闲触发/生成/跳过/命名/上限/任务历史、定时任务存储/到期执行/忙碌重试/REST 增删查、RAG 分块/过滤/对账/词法/余弦/嵌入探测/指纹降级/CLI；

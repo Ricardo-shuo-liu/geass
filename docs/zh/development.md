@@ -58,3 +58,6 @@ cd web && npm run dev      # 前端热更新 :5173（自动代理到 8765）
   发送给模型；不需要时在 `config.toml` 设置 `agent.evolution_enabled = false`
 
 完整设计与后续路线图见 [DESIGN.md](DESIGN.md)。
+
+按功能域展开的代码现状问题与能力边界见
+[已知问题与功能边界](known-issues.md)。

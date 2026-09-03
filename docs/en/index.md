@@ -19,6 +19,7 @@
 - [Resource management (phone)](resources.md): visual management of memory/MCP/RAG/skills/POT/schedule
 - [Configuration](configuration.md): precedence, environment variables, CLI and runtime API
 - [Project layout & development](development.md): modules, development, known limitations
+- [Known issues & capability boundaries](known-issues.md): code-review issues, capability granularity, and limitations by functional area
 
 ## Related docs
 

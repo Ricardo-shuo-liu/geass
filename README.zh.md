@@ -10,6 +10,9 @@ Geass 把电脑变成"被施加 Geass"的执行端，手机是遥控器：在 PW
 用文字、语音或手动直控完成操作。命令入口、Agent 循环与动作执行的编排层代号
 **Paisley-Park**。
 
+> **状态**：功能 MVP。当前存在明确的平台与精度限制，不回避问题；使用前请阅读
+> [已知问题与功能边界](docs/zh/known-issues.md)。
+
 ## 功能特性
 
 - 实时屏幕推流与异地访问（Tailscale / Cloudflare 临时隧道）
@@ -84,3 +87,4 @@ python -m geass.config set --ocr-token YOUR_TOKEN
 - [English documentation](docs/en/index.md)
 - [设计文档与路线图](docs/DESIGN.md)
 - [SKILL 编写说明](skills/README.md)
+- [已知问题与功能边界](docs/zh/known-issues.md)：按功能域整理的当前限制与能力边界

@@ -59,3 +59,6 @@ cd web && npm run dev      # frontend HMR :5173 (proxied to 8765)
   `agent.evolution_enabled = false` if unwanted
 
 Full design and roadmap: [DESIGN.md](DESIGN.md).
+
+The full, area-by-area review of current-code problems and capability
+boundaries: [Known issues & capability boundaries](known-issues.md).
