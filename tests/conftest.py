@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,7 +11,9 @@ from geass.agent import Agent
 from geass.config import AgentConfig, Config
 from geass.io.backend import InputBackend
 from geass.screen import ScreenCapture, ScreenStreamer
+from geass.server.masks import MaskManager
 from geass.server.state import AppState
+from geass.server.trust import TrustManager
 
 
 class FakeBackend(InputBackend):
@@ -122,6 +126,7 @@ def make_state(
     client: Any = None,
 ) -> AppState:
     config = config or make_config()
+    isolated = Path(tempfile.mkdtemp(prefix="geass-test-state-"))
     backend = backend or FakeBackend()
     capture = capture or FakeCapture()  # type: ignore[assignment]
     streamer = ScreenStreamer(capture, fps=15)  # type: ignore[arg-type]
@@ -138,4 +143,6 @@ def make_state(
         backend=backend,
         agent=agent,
         client=client,
+        trust=TrustManager(isolated / "trust.json"),
+        masks=MaskManager(isolated / "masks.json"),
     )

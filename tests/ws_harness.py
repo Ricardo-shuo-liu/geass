@@ -61,10 +61,16 @@ class WSClient:
             {"type": "websocket.receive", "text": json.dumps(data, ensure_ascii=False)}
         )
 
-    async def receive_json(self) -> dict:
-        message = await asyncio.wait_for(self.from_app.get(), 5)
-        assert message.get("type") == "websocket.send"
-        return json.loads(message.get("text") or "null")
+    async def receive_json(self, skip_types: set[str] | None = None) -> dict:
+        """读取一条消息；默认跳过连接时自动推送的快照消息。"""
+        skip = {"privacy_masks_changed", "trust_changed"} if skip_types is None else skip_types
+        while True:
+            message = await asyncio.wait_for(self.from_app.get(), 5)
+            assert message.get("type") == "websocket.send"
+            payload = json.loads(message.get("text") or "null")
+            if isinstance(payload, dict) and payload.get("type") in skip:
+                continue
+            return payload
 
     async def close(self) -> None:
         await self.to_app.put({"type": "websocket.disconnect", "code": 1000})

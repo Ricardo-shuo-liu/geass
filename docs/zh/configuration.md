@@ -76,6 +76,7 @@
 | `GEASS_MODEL` | 覆盖 `agent.model` |
 | `GEASS_VISION_WHITELIST` | 逗号分隔的视觉模型白名单，覆盖 `agent.vision_whitelist` |
 | `GEASS_TOKEN` | 可选：固定 Token（否则每次启动随机） |
+| `GEASS_PUBLIC_URL` | 覆盖 `server.public_url`：扫码配对使用的公网地址（如 Tailscale/Cloudflare 域名） |
 | `GEASS_PADDLEOCR_TOKEN` | AI Studio OCR Token（兼容回退 `PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN`） |
 | `GEASS_PADDLEOCR_MODEL` | 覆盖 `agent.ocr_model` |
 | `GEASS_PADDLEOCR_BASE_URL` | 覆盖 `agent.ocr_base_url` |
@@ -86,5 +87,6 @@
 配置按优先级合并：**环境变量 > `~/.geass/env.toml` > `config.toml` > 默认值**。
 
 - 启动时用过的 `GEASS_*` 环境变量会自动存入 `~/.geass/env.toml`（文件权限 0600），无需每次配置；
+- 扫码配对地址：`server.public_url` 为空时用本机第一个局域网 IPv4 生成二维码；异地访问可执行 `python -m geass.config set --public-url https://your-domain`；
 - 命令行管理：`python -m geass.config show` 查看（密钥脱敏）；`python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false` 写入（位置参数依次为 API_KEY、BASE_URL、MODEL）；OCR：`python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`；视觉白名单：`--vision-whitelist gpt-4o,deepseek-v4-flash`；记忆：`--memory-enabled false` / `--memory-path ...`；技能与进化：`--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`；安全边界：`--security-enabled false` / `--approval-timeout 60`；
 - 运行时接口：`GET /api/config`（脱敏查看）、`POST /api/config`（JSON 更新，如 `{"model":"...","base_url":"...","api_key":"...","vision":false}`），更新后立即生效并持久化。

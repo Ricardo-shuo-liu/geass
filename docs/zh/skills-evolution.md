@@ -23,3 +23,7 @@ SKILL 不再直接从仓库目录读取。仓库里的 `skills/` 只是种子：
 下一条命令开始前就会被加载，手机端也会收到"进化生成新技能"的提示。两次进化
 之间至少间隔 `agent.evolution_interval`（默认 1800 秒），自动生成数量上限为
 `agent.evolution_max_skills`（默认 20）。相关配置见下方配置表。
+
+备份或迁移 SKILL：`geass export skill --all --to <dir>`，或指定名称
+`geass export skill <name> --to <dir>`；附带文件会一并复制，详见
+[命令行](cli.md)。

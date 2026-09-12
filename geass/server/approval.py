@@ -28,20 +28,70 @@ class PendingApproval:
     expires_in: float
 
 
+@dataclass(frozen=True)
+class PendingAction:
+    """一次动作预览：可视化标注 + 可选的人工确认。"""
+
+    id: str
+    tool: str
+    kind: str
+    target: dict[str, Any]
+    summary: str
+    decision_required: bool = False
+    delay_ms: int = 0
+    step: int = 0
+    total_steps: int = 0
+    plan_goal: str = ""
+    security_reason: str = ""
+    expires_in: float = 30.0
+    task_id: str = ""
+
+    def to_message(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": "action_proposal",
+            "id": self.id,
+            "tool": self.tool,
+            "kind": self.kind,
+            "target": dict(self.target),
+            "summary": self.summary,
+            "decision_required": self.decision_required,
+            "delay_ms": self.delay_ms,
+            "step": self.step,
+            "total_steps": self.total_steps,
+            "undoable": False,
+            "expires_in": self.expires_in,
+        }
+        if self.plan_goal:
+            payload["plan_goal"] = self.plan_goal
+        if self.security_reason:
+            payload["security_reason"] = self.security_reason
+        if self.task_id:
+            payload["task_id"] = self.task_id
+        return payload
+
+
 class ApprovalManager:
     def __init__(
         self,
         default_timeout: float = 30.0,
         broadcast: BroadcastFn | None = None,
+        has_clients: Callable[[], bool] | None = None,
     ) -> None:
         self.default_timeout = default_timeout
         self.broadcast = broadcast
+        self.has_clients = has_clients
         self._pending: dict[str, tuple[asyncio.Future, PendingApproval]] = {}
+        self._actions: dict[str, tuple[asyncio.Future, PendingAction]] = {}
 
     @property
     def pending(self) -> list[PendingApproval]:
         """当前仍在等待审核的请求（按创建顺序）。"""
         return [pending for _, pending in self._pending.values()]
+
+    @property
+    def pending_actions(self) -> list[PendingAction]:
+        """当前仍挂起的动作预览（按创建顺序）。"""
+        return [action for _, action in self._actions.values()]
 
     async def _broadcast(self, message: dict[str, Any]) -> None:
         if self.broadcast is None:
@@ -113,6 +163,108 @@ class ApprovalManager:
         )
         return True
 
+    async def request_action(self, action: PendingAction) -> dict[str, Any]:
+        """广播一次动作预览；按需等待确认，或等待可视化延迟后自动放行。"""
+        if action.decision_required and self.has_clients is not None and not self.has_clients():
+            await self._broadcast(
+                {
+                    "type": "action_resolved",
+                    "id": action.id,
+                    "approved": False,
+                    "auto": False,
+                    "reason": "无手机端在线，已拒绝该动作",
+                }
+            )
+            return {
+                "approved": False,
+                "auto": False,
+                "target": None,
+                "reason": "无手机端在线，已拒绝该动作",
+            }
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        self._actions[action.id] = (future, action)
+        await self._broadcast(action.to_message())
+        timeout = max(0.0, float(action.expires_in))
+        if not action.decision_required:
+            timeout = max(0.0, float(action.delay_ms) / 1000.0)
+        if timeout <= 0 and not action.decision_required:
+            self._actions.pop(action.id, None)
+            await self._broadcast(
+                {
+                    "type": "action_resolved",
+                    "id": action.id,
+                    "approved": True,
+                    "auto": True,
+                    "reason": "已自动执行",
+                }
+            )
+            return {"approved": True, "auto": True, "target": None, "reason": "已自动执行"}
+        try:
+            result = await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            self._actions.pop(action.id, None)
+            if action.decision_required:
+                await self._broadcast(
+                    {
+                        "type": "action_resolved",
+                        "id": action.id,
+                        "approved": False,
+                        "auto": False,
+                        "reason": "动作确认超时，已自动拒绝",
+                    }
+                )
+                return {
+                    "approved": False,
+                    "auto": False,
+                    "target": None,
+                    "reason": f"动作确认超时（{timeout:.0f}s），已自动拒绝",
+                }
+            await self._broadcast(
+                {
+                    "type": "action_resolved",
+                    "id": action.id,
+                    "approved": True,
+                    "auto": True,
+                    "reason": "已自动执行",
+                }
+            )
+            return {"approved": True, "auto": True, "target": None, "reason": "已自动执行"}
+
+    async def resolve_action(
+        self,
+        action_id: str,
+        approved: bool,
+        target: dict[str, Any] | None = None,
+    ) -> bool:
+        """处理客户端对动作预览的决定；返回 False 表示请求不存在或已处理。"""
+        entry = self._actions.pop(str(action_id), None)
+        if entry is None:
+            return False
+        future, action = entry
+        if future.done():
+            return False
+        approved_value = bool(approved)
+        future.set_result(
+            {
+                "approved": approved_value,
+                "auto": False,
+                "target": target if approved_value else None,
+                "reason": "用户批准了该动作" if approved_value else "用户拒绝了该动作",
+            }
+        )
+        await self._broadcast(
+            {
+                "type": "action_resolved",
+                "id": action.id,
+                "approved": approved_value,
+                "auto": False,
+                "reason": "用户批准了该动作" if approved_value else "用户拒绝了该动作",
+            }
+        )
+        return True
+
     async def reject_all(self, reason: str = "任务已停止") -> None:
         """拒绝全部挂起请求，避免 Agent 在停止/切换任务时悬挂。"""
         for approval_id in list(self._pending):
@@ -129,6 +281,31 @@ class ApprovalManager:
                     "type": "approval_resolved",
                     "id": pending.id,
                     "approved": False,
+                    "reason": reason,
+                }
+            )
+        for action_id in list(self._actions):
+            action_entry = self._actions.get(action_id)
+            if action_entry is None:
+                continue
+            future, action = action_entry
+            if future.done():
+                continue
+            future.set_result(
+                {
+                    "approved": False,
+                    "auto": False,
+                    "target": None,
+                    "reason": reason,
+                }
+            )
+            self._actions.pop(action_id, None)
+            await self._broadcast(
+                {
+                    "type": "action_resolved",
+                    "id": action.id,
+                    "approved": False,
+                    "auto": False,
                     "reason": reason,
                 }
             )

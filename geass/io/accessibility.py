@@ -180,6 +180,111 @@ def _list_windows_via_bridge(limit: int, timeout: float) -> list[dict[str, Any]]
     return [item for item in windows if isinstance(item, dict) and "name" in item]
 
 
+def _list_sensitive_via_bridge(limit: int, timeout: float) -> list[dict[str, Any]]:
+    result = _run_bridge(
+        {
+            "op": "sensitive",
+            "limit": limit,
+            "timeout": timeout,
+        },
+        timeout,
+    )
+    fields = result.get("fields")
+    if not isinstance(fields, list):
+        return []
+    return [item for item in fields if isinstance(item, dict) and "w" in item]
+
+
+def list_sensitive_fields(limit: int = 10, timeout: float = 3.0) -> list[dict[str, Any]]:
+    """查找疑似敏感输入框（密码/受保护文本），返回屏幕像素包围盒。
+
+    供隐私遮罩的“自动识别”使用；AT-SPI 不可用时返回空列表，由调用方降级。
+    """
+    limit = max(1, min(int(limit), 50))
+    try:
+        pyatspi = _load_pyatspi()
+    except AccessibilityError as exc:
+        if exc.bridge_fallback:
+            return _list_sensitive_via_bridge(limit, float(timeout))
+        return []
+
+    try:
+        desktop = pyatspi.Registry.getDesktop(0)
+    except Exception:
+        return []
+
+    fields: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    deadline = time.monotonic() + max(0.1, float(timeout))
+    desktop_coords = getattr(pyatspi, "DESKTOP_COORDS", 0)
+
+    def is_sensitive(node: Any, role_name: str) -> bool:
+        if "password" in role_name.casefold():
+            return True
+        try:
+            attributes = node.getAttributes() or []
+        except Exception:
+            return False
+        for item in attributes:
+            text = str(item).casefold()
+            if text.startswith("protected:") and text.split(":", 1)[1].strip() in (
+                "true",
+                "1",
+                "yes",
+            ):
+                return True
+        return False
+
+    def walk(node: Any) -> None:
+        if len(fields) >= limit or time.monotonic() >= deadline:
+            return
+        marker = id(node)
+        if marker in seen:
+            return
+        seen.add(marker)
+        try:
+            role_name = str(node.getRoleName() or "")
+        except Exception:
+            role_name = ""
+        if role_name and is_sensitive(node, role_name):
+            try:
+                component = node.queryComponent()
+                extents = component.getExtents(desktop_coords)
+                x = int(getattr(extents, "x", 0))
+                y = int(getattr(extents, "y", 0))
+                w = int(getattr(extents, "width", 0))
+                h = int(getattr(extents, "height", 0))
+                if w > 0 and h > 0:
+                    fields.append(
+                        {
+                            "name": str(getattr(node, "name", "") or ""),
+                            "role": role_name,
+                            "x": x,
+                            "y": y,
+                            "w": w,
+                            "h": h,
+                        }
+                    )
+            except Exception:
+                pass
+        try:
+            child_count = int(node.childCount)
+        except Exception:
+            return
+        for index in range(child_count):
+            if len(fields) >= limit or time.monotonic() >= deadline:
+                return
+            try:
+                child = node.getChildAtIndex(index)
+            except Exception:
+                continue
+            if child is not None:
+                walk(child)
+
+    walk(desktop)
+    return fields[:limit]
+
+
 def find_elements(
     name: str = "",
     role: str = "",

@@ -133,7 +133,8 @@ alternative way to obtain the token, but the runtime does not depend on MCP.
 ### 4. Start the server
 
 ```bash
-./scripts/run.sh
+./scripts/run.sh          # normal start
+./scripts/run.sh --qr     # start and print a pairing QR code
 ```
 
 The console prints:
@@ -147,11 +148,13 @@ Geass 服务已启动
 ### 5. Connect your phone
 
 1. Put the phone and PC on the **same Wi-Fi** (or use the remote-access helper below);
-2. Open the printed address in the phone browser (replace `localhost` with the PC's LAN IP, e.g. `http://192.168.1.10:8765`);
-3. Enter the Token, then watch the live screen and type or tap 🎤 to issue commands.
+2. **QR pairing (recommended)**: after starting with `--qr`, scan the terminal QR code with the phone camera; the control UI opens and pairs automatically;
+3. Alternatively open the printed address in the phone browser (replace `localhost` with the PC's LAN IP, e.g. `http://192.168.1.10:8765`) and enter the Token;
+4. Once connected, watch the live screen and type or tap 🎤 to issue commands.
 
 > Find the LAN IP with `ip addr` or `hostname -I`.
 > **A fresh random Token is generated on every startup** and printed in the terminal; the old one stops working immediately.
+> The QR code carries a single-use pairing code (5-minute TTL by default) instead of the long-lived Token; rerun `./scripts/run.sh --qr` if it expires.
 
 ### 6. Remote access (different networks)
 

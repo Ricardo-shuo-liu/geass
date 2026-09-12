@@ -375,3 +375,31 @@ def test_default_model_is_deepseek_v4_flash(tmp_path):
     path.write_text("", encoding="utf-8")
     config = load_config(path)
     assert config.agent.model == "deepseek-v4-flash"
+
+
+def test_public_url_from_env(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[server]\npublic_url = "https://file.example.com/"\n', encoding="utf-8")
+    monkeypatch.setenv("GEASS_PUBLIC_URL", "https://env.example.com/")
+
+    config = load_config(path)
+
+    assert config.server.public_url == "https://env.example.com"
+
+
+def test_public_url_user_env_overrides_project(monkeypatch, tmp_path):
+    path = tmp_path / "config.toml"
+    path.write_text('[server]\npublic_url = "https://project.example.com"\n', encoding="utf-8")
+    home = tmp_path / "home"
+    monkeypatch.setenv("GEASS_HOME", str(home))
+    monkeypatch.delenv("GEASS_PUBLIC_URL", raising=False)
+    user_env = home / ".geass" / "env.toml"
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text(
+        '[server]\npublic_url = "https://user.example.com/"\n',
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.server.public_url == "https://user.example.com"

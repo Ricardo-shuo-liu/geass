@@ -32,9 +32,15 @@ def image_difference(before: Image.Image, after: Image.Image, size: int = 64) ->
 
 
 class ScreenCapture:
-    def __init__(self, max_width: int = 1920, jpeg_quality: int = 70) -> None:
+    def __init__(
+        self,
+        max_width: int = 1920,
+        jpeg_quality: int = 70,
+        masks: Any = None,
+    ) -> None:
         self.max_width = max_width
         self.jpeg_quality = jpeg_quality
+        self.masks = masks
         self._sct: Any = None
         self._lock = threading.Lock()
 
@@ -61,7 +67,13 @@ class ScreenCapture:
             monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
             shot = sct.grab(monitor)
         image = Image.frombytes("RGB", shot.size, shot.rgb)
-        return self._resize(image, max_edge)
+        image = self._resize(image, max_edge)
+        if self.masks is not None:
+            try:
+                image = self.masks.apply(image)
+            except Exception:
+                logger.warning("应用隐私遮罩失败", exc_info=True)
+        return image
 
     def _resize(self, image: Image.Image, max_edge: int | None) -> Image.Image:
         width, height = image.size

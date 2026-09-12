@@ -31,7 +31,15 @@ const FONT_SIZES: Record<DanmakuSize, string> = {
 
 function passes(event: ControlEvent, density: DanmakuDensity): boolean {
   if (event.type === 'approval_request') return true;
+  if (event.type === 'action_proposal') return true;
   if (event.type === 'approval_resolved') return false;
+  if (
+    event.type === 'action_resolved' ||
+    event.type === 'privacy_masks_changed' ||
+    event.type === 'trust_changed'
+  ) {
+    return false;
+  }
   if (density === 'all') return true;
   const state = event.type === 'agent_status' ? event.state : event.type;
   if (density === 'minimal') {

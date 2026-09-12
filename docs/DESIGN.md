@@ -79,7 +79,7 @@ Geass 是一个"手机指挥电脑"的系统：
   空闲反思自动提炼并注入提示词；
 - CLI 终端助手：`geass/cli/` 独立包，Rich 终端 UI，light/deliberate 双模式
   复用资产，与手机 GUI 分离；
-- 统一命令：`geass` 分发器（serve/cli/rag/config/check/pot/reset/commands），
+- 统一命令：`geass` 分发器（serve/cli/export/rag/config/check/pot/reset/commands），
   双确认重置；
 - 后台任务：`geass/server/task_manager.py` 并发独立 Agent，键鼠动作经全局
   输入锁串行，结果持久化 `~/.geass/.tasks/`，trace 全量入库；
@@ -93,7 +93,8 @@ Geass 是一个"手机指挥电脑"的系统：
   填表、拖拽等稍复杂任务；
 - 持久记忆：`remember`/`recall`/`forget` 把跨任务信息写入
   `~/.geass/.memory`，任务开始前注入相关条目；
-- 手机端 PWA：画面显示、命令框、语音按钮、状态面板、停止按钮；
+- 手机端 PWA：画面显示、命令框、语音按钮、状态面板、停止按钮；`geass serve --qr`
+  打印一次性配对二维码，扫码自动换取 Token 并进入控制界面；
 - 异地访问助手 `scripts/remote.sh`：Tailscale 或 Cloudflare 临时隧道，手机无需与电脑同一网络；
 - 局域网 + Token 认证。
 
@@ -109,6 +110,7 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/evolution/`：空闲进化引擎（活动时间检测、任务历史、模型生成
   SKILL、事件日志与状态广播）+ POT 反思（cot/rot/trace 存储与注入）；
 - `geass/cli/`：终端助手（Rich TUI、light/deliberate 双模式、资产工具）；
+- `geass/export.py`：SKILL / COT / ROT 资产导出（按名称或全量，带 manifest）；
 - `geass/dispatch.py`：统一命令分发器与运维命令；
 - `geass/scheduler/`：定时任务存储（`~/.geass/.schedule/jobs.json`）与
   后台触发循环（到期执行、忙碌 5 秒重试、状态事件）；
@@ -128,6 +130,8 @@ Geass 是一个"手机指挥电脑"的系统：
 - `geass/asyncutil.py`：阻塞调用（OCR/终端）与事件循环之间的守护线程桥接；
 - `geass/screen.py`：屏幕抓取、缩放、JPEG 编码、帧流广播；
 - `geass/server/`：REST API、WebSocket、认证、共享状态与 `approval.py` 人工审核网关；
+- `geass/server/trust.py` / `masks.py`：动作预览分级（智能/全部确认/全部放行）
+  与隐私遮罩（截图出口统一打码）；
 - `geass/server/manual.py`：手动直控协议（归一化坐标/按键 → InputBackend）；
 - `skills/`：用户技能目录，服务启动时扫描；
 - `scripts/setup.sh`：初始化入口，必要时 clone 仓库后交给 `install.sh`；
@@ -143,6 +147,10 @@ Geass 是一个"手机指挥电脑"的系统：
 | 端点 | 说明 |
 | --- | --- |
 | `GET /api/health` | 健康检查（公开） |
+| `POST /api/pair` | 扫码配对：一次性配对码换取访问 Token（公开，带限流） |
+| `GET/POST /api/trust` | 动作预览模式、可视化延迟、工具覆盖与任务放行（需 Token） |
+| `GET /api/privacy/masks` | 读取隐私遮罩与总开关（需 Token） |
+| `POST /api/privacy/detect` | 自动识别敏感区域建议（AT-SPI 密码框 + OCR 关键词，需 Token） |
 | `GET /api/info` | 服务信息（需 Token） |
 | `POST /api/transcribe` | 上传音频 → whisper-1 转文字（需 Token） |
 | `POST /api/agent/stop` | 停止当前 Agent 任务（需 Token） |
@@ -154,6 +162,7 @@ Geass 是一个"手机指挥电脑"的系统：
 | `GET/POST /api/tasks`、`POST /api/tasks/{id}/cancel`、`DELETE /api/tasks/{id}` | 后台任务管理（需 Token） |
 | `WS /ws/screen` | 服务端 → 客户端二进制 JPEG 帧（token 经子协议） |
 | `WS /ws/control` | 双向 JSON：`command` / `stop` / `ping` / `approval` / `manual_input`，状态与审核事件 |
+| `WS /ws/control`（信任层） | `action_proposal` / `action_decision` / `action_resolved` / `privacy_mask` / `privacy_masks_changed` / `trust_changed` |
 
 Token 通过 `X-GEASS-Token` 请求头（REST）传递；WebSocket 通过 `Sec-WebSocket-Protocol` 子协议传递（客户端发送 `["geass", token]`），避免 token 出现在 URL 与访问日志中。
 

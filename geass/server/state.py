@@ -28,7 +28,10 @@ from ..skills import (
     sync_system_skills,
 )
 from .approval import ApprovalManager
+from .masks import MaskManager
+from .pairing import PairingManager
 from .task_manager import BackgroundTaskManager
+from .trust import TrustManager
 
 
 @dataclass
@@ -55,6 +58,9 @@ class AppState:
     task_manager: BackgroundTaskManager | None = None
     last_activity: float = field(default_factory=time.time)
     approval_manager: ApprovalManager = field(default_factory=ApprovalManager)
+    pairing: PairingManager = field(default_factory=PairingManager)
+    trust: TrustManager = field(default_factory=TrustManager)
+    masks: MaskManager = field(default_factory=MaskManager)
     control_clients: set = field(default_factory=set)
     agent_task: asyncio.Task | None = None
     cancel_event: asyncio.Event | None = None
@@ -136,6 +142,8 @@ def build_state(config: Config) -> AppState:
         approval_manager=approval_manager,
     )
     approval_manager.broadcast = lambda message: broadcast_control(state, message)
+    approval_manager.has_clients = lambda: bool(state.control_clients)
+    capture.masks = state.masks
     state.task_manager = BackgroundTaskManager(
         state,
         max_tasks=config.agent.background_max_tasks,
@@ -296,12 +304,13 @@ def make_agent(state: AppState, status_cb=None) -> Agent:
         terminal=state.terminal_manager,
         ocr=state.ocr,
         security=state.config.security,
-        approval_gateway=state.approval_manager.request,
+        approval_gateway=state.approval_manager,
         memory=state.memory,
         schedule_store=state.schedule_store,
         rag=state.rag,
         pot=state.pot,
         mcp=state.mcp,
+        trust=state.trust,
         input_lock=state.input_lock,
         background_starter=(state.task_manager.start if state.task_manager is not None else None),
     )

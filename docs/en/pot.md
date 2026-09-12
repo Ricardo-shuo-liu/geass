@@ -14,3 +14,7 @@ POT = Reflect → Distill → Template:
 The idle evolution engine reflects over traces and updates the COT or creates
 new ROTs. Manage with `geass pot cot show` / `geass pot rot list|show|disable|
 enable|delete <name>`.
+
+Export with `geass export cot --to <dir>`, `geass export rot <name> --to <dir>`
+or `geass export rot --all --to <dir>` (disabled ROTs are included unless
+`--enabled-only` is passed); see [Command line](cli.md).

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApprovalModal } from './components/ApprovalModal';
+import { ActionPreviewCard, ActionPreviewStrip } from './components/ActionPreviewCard';
 import { CommandBar } from './components/CommandBar';
 import { ConnectPanel } from './components/ConnectPanel';
 import { DanmakuPanel } from './components/DanmakuPanel';
@@ -10,21 +11,44 @@ import { ManualPanel } from './components/ManualPanel';
 import PlanCard from './components/PlanCard';
 import { ResourcePanel } from './components/ResourcePanel';
 import { ScreenView } from './components/ScreenView';
-import { apiInfo, stopAgent, transcribe } from './api';
+import { TrustPanel } from './components/TrustPanel';
+import {
+  apiInfo,
+  detectSensitiveRegions,
+  getPrivacyMasks,
+  getTrust,
+  pairDevice,
+  stopAgent,
+  transcribe,
+  updateTrust,
+} from './api';
+import { clearPairCode, readPairCode } from './pairing';
+import {
+  clearLegacyToken,
+  clearSessionToken,
+  readSessionToken,
+  writeSessionToken,
+} from './storage';
 import {
   openControlSocket,
   openScreenSocket,
+  sendActionDecision,
+  sendPrivacyMask,
   sendApproval,
   sendManualInput,
 } from './ws';
 import type {
+  ActionProposal,
   ApprovalRequest,
   ControlEvent,
   DanmakuDensity,
   DanmakuIntensity,
   DanmakuSize,
   ManualAction,
+  PrivacyMask,
+  SensitiveRegion,
   TaskPlan,
+  TrustSettings,
 } from './types';
 
 const TOKEN_KEY = 'geass-token';
@@ -50,6 +74,7 @@ const BUSY_STATES = [
   'acting',
   'acted',
   'awaiting_approval',
+  'awaiting_action',
   'cancelling',
 ];
 
@@ -76,6 +101,7 @@ function initialSetting<T extends string>(
 export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [booting, setBooting] = useState(true);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [frame, setFrame] = useState<Blob | null>(null);
   const [screenOpen, setScreenOpen] = useState(true);
@@ -98,13 +124,89 @@ export default function App() {
   const [plan, setPlan] = useState<TaskPlan | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [trustOpen, setTrustOpen] = useState(false);
+  const [trust, setTrust] = useState<TrustSettings>({
+    mode: 'smart',
+    visual_delay_ms: 600,
+    overrides: {},
+    task_allow_all: false,
+  });
+  const [masks, setMasks] = useState<PrivacyMask[]>([]);
+  const [masksEnabled, setMasksEnabled] = useState(false);
+  const [maskMode, setMaskMode] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ActionProposal | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<Record<string, unknown>>({});
+  const [previewResolved, setPreviewResolved] = useState<{
+    approved: boolean;
+    auto: boolean;
+  } | null>(null);
+  const [suggestions, setSuggestions] = useState<SensitiveRegion[]>([]);
+  const [detecting, setDetecting] = useState(false);
+  const [detectNote, setDetectNote] = useState<string | null>(null);
 
-  // 清理旧版本可能遗留的本地 Token；当前版本只保存在内存中，刷新页面后必须重新输入。
+  // 扫码/恢复会话：优先使用 sessionStorage 中的 Token，其次消费 URL 中的一次性配对码。
   useEffect(() => {
-    localStorage.removeItem(TOKEN_KEY);
+    clearLegacyToken(TOKEN_KEY);
+    let disposed = false;
+    const bootstrap = async () => {
+      const stored = readSessionToken(TOKEN_KEY);
+      if (stored) {
+        let valid = false;
+        try {
+          await apiInfo(stored);
+          valid = true;
+        } catch {
+          clearSessionToken(TOKEN_KEY);
+        }
+        if (valid) {
+          if (!disposed) {
+            setToken(stored);
+            clearPairCode();
+            setBooting(false);
+          }
+          return;
+        }
+      }
+      const code = readPairCode(window.location.hash);
+      if (!code) {
+        if (!disposed) {
+          if (stored) setConnectError('会话已失效，请重新扫码或输入 Token');
+          setBooting(false);
+        }
+        return;
+      }
+      try {
+        const value = await pairDevice(code);
+        writeSessionToken(TOKEN_KEY, value);
+        clearPairCode();
+        if (!disposed) {
+          setConnectError(null);
+          setToken(value);
+        }
+      } catch (error) {
+        clearPairCode();
+        if (!disposed) {
+          setConnectError(
+            `${errorMessage(error)}；请在电脑上重新运行 geass serve --qr，或手动输入 Token`,
+          );
+        }
+      } finally {
+        if (!disposed) setBooting(false);
+      }
+    };
+    void bootstrap();
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   const controlRef = useRef<WebSocket | null>(null);
+  const previewClearRef = useRef<number | null>(null);
+  const pendingActionRef = useRef<ActionProposal | null>(null);
+
+  useEffect(() => {
+    pendingActionRef.current = pendingAction;
+  }, [pendingAction]);
   const voiceRecRef = useRef<unknown>(null);
   const mediaRecRef = useRef<MediaRecorder | null>(null);
 
@@ -131,6 +233,38 @@ export default function App() {
     } else if (event.type === 'agent_result') {
       setBusy(false);
       setPlan(null);
+    } else if (event.type === 'action_proposal') {
+      if (previewClearRef.current !== null) {
+        window.clearTimeout(previewClearRef.current);
+        previewClearRef.current = null;
+      }
+      setPreviewResolved(null);
+      setPendingAction(event);
+      setPreviewTarget({ ...event.target });
+      if (event.decision_required) setBusy(true);
+    } else if (event.type === 'action_resolved') {
+      const current = pendingActionRef.current;
+      if (current && current.id === event.id) {
+        setPreviewResolved({ approved: event.approved, auto: event.auto });
+        if (previewClearRef.current !== null) {
+          window.clearTimeout(previewClearRef.current);
+        }
+        previewClearRef.current = window.setTimeout(() => {
+          previewClearRef.current = null;
+          setPendingAction(null);
+          setPreviewResolved(null);
+        }, 1200);
+      }
+    } else if (event.type === 'privacy_masks_changed') {
+      setMasks(event.masks);
+      setMasksEnabled(event.enabled);
+    } else if (event.type === 'trust_changed') {
+      setTrust({
+        mode: event.mode,
+        visual_delay_ms: event.visual_delay_ms,
+        overrides: event.overrides,
+        task_allow_all: event.task_allow_all,
+      });
     }
   }, []);
 
@@ -139,10 +273,10 @@ export default function App() {
     setConnectError(null);
     try {
       await apiInfo(value);
-      localStorage.removeItem(TOKEN_KEY);
+      writeSessionToken(TOKEN_KEY, value);
       setToken(value);
     } catch (error) {
-      localStorage.removeItem(TOKEN_KEY);
+      clearSessionToken(TOKEN_KEY);
       setConnectError(errorMessage(error));
     } finally {
       setConnecting(false);
@@ -150,7 +284,8 @@ export default function App() {
   }, []);
 
   const disconnect = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
+    clearLegacyToken(TOKEN_KEY);
+    clearSessionToken(TOKEN_KEY);
     setToken(null);
     setFrame(null);
     setEvents([]);
@@ -159,9 +294,129 @@ export default function App() {
     setPlan(null);
     setManualOpen(false);
     setResourcesOpen(false);
+    setTrustOpen(false);
+    setMaskMode(false);
+    setPendingAction(null);
+    setSuggestions([]);
+    setDetectNote(null);
     setLogOpen(false);
     setSettingsOpen(false);
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    let disposed = false;
+    void (async () => {
+      try {
+        const [settings, maskSnapshot] = await Promise.all([
+          getTrust(token),
+          getPrivacyMasks(token),
+        ]);
+        if (!disposed) {
+          setTrust(settings);
+          setMasks(maskSnapshot.masks);
+          setMasksEnabled(maskSnapshot.enabled);
+        }
+      } catch {
+        // 保底等待 WS 推送的快照
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [token]);
+
+  const updateTrustSettings = useCallback(
+    (patch: {
+      mode?: TrustSettings['mode'];
+      visual_delay_ms?: number;
+      overrides?: Record<string, 'auto' | 'confirm' | null>;
+      task_allow_all?: boolean;
+    }) => {
+      if (!token) return;
+      void updateTrust(token, patch).then((settings) => {
+        setTrust(settings);
+      });
+    },
+    [token],
+  );
+
+  const decideAction = useCallback(
+    (approved: boolean, target?: Record<string, unknown>) => {
+      const ws = controlRef.current;
+      if (!ws || !pendingAction) return;
+      sendActionDecision(ws, pendingAction.id, approved, target ?? previewTarget);
+      if (!approved) setPendingAction(null);
+    },
+    [pendingAction, previewTarget],
+  );
+
+  const emitPrivacyMask = useCallback(
+    (
+      payload:
+        | { action: 'add'; rect: { x: number; y: number; w: number; h: number } }
+        | { action: 'remove'; id: string }
+        | { action: 'clear' }
+        | { action: 'enable' | 'disable' | 'toggle' },
+    ) => {
+      const ws = controlRef.current;
+      if (!ws) return;
+      sendPrivacyMask(ws, payload);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!maskMode) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMaskMode(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [maskMode]);
+
+  const runDetectSensitive = useCallback(() => {
+    if (!token || detecting) return;
+    setDetecting(true);
+    setDetectNote(null);
+    void detectSensitiveRegions(token)
+      .then((result) => {
+        setSuggestions(result.regions);
+        setDetectNote(
+          result.regions.length > 0
+            ? `识别到 ${result.regions.length} 个建议区域`
+            : '未识别到敏感区域，可手动框选',
+        );
+      })
+      .catch(() => {
+        setSuggestions([]);
+        setDetectNote('自动识别失败，请检查 OCR / AT-SPI 环境');
+      })
+      .finally(() => setDetecting(false));
+  }, [token, detecting]);
+
+  const applySuggestion = useCallback(
+    (index: number) => {
+      const region = suggestions[index];
+      if (!region) return;
+      emitPrivacyMask({
+        action: 'add',
+        rect: { x: region.x, y: region.y, w: region.w, h: region.h },
+      });
+      setSuggestions((previous) => previous.filter((_item, i) => i !== index));
+    },
+    [suggestions, emitPrivacyMask],
+  );
+
+  const applyAllSuggestions = useCallback(() => {
+    for (const region of suggestions) {
+      emitPrivacyMask({
+        action: 'add',
+        rect: { x: region.x, y: region.y, w: region.w, h: region.h },
+      });
+    }
+    setSuggestions([]);
+  }, [suggestions, emitPrivacyMask]);
 
   const sendCommand = useCallback(
     (text: string) => {
@@ -240,6 +495,20 @@ export default function App() {
   }, []);
 
   const recordFallback = useCallback(async () => {
+    if (
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof MediaRecorder === 'undefined'
+    ) {
+      setListening(false);
+      addEvent({
+        type: 'agent_status',
+        state: 'error',
+        step: 0,
+        tool: null,
+        message: '当前浏览器不支持录音（局域网 HTTP 下需改用文字输入或 HTTPS）',
+      });
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -355,7 +624,8 @@ export default function App() {
         },
         (event) => {
           if (event.code === 4401) {
-            localStorage.removeItem(TOKEN_KEY);
+            clearLegacyToken(TOKEN_KEY);
+            clearSessionToken(TOKEN_KEY);
             setToken(null);
             return;
           }
@@ -369,7 +639,8 @@ export default function App() {
         (event) => addEvent(event),
         (event) => {
           if (event.code === 4401) {
-            localStorage.removeItem(TOKEN_KEY);
+            clearLegacyToken(TOKEN_KEY);
+            clearSessionToken(TOKEN_KEY);
             setToken(null);
             return;
           }
@@ -392,7 +663,7 @@ export default function App() {
   if (!token) {
     return (
       <ConnectPanel
-        connecting={connecting}
+        connecting={connecting || booting}
         error={connectError}
         onConnect={connect}
       />
@@ -434,6 +705,14 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`tool-btn ${trustOpen ? 'active' : ''}`}
+            onClick={() => setTrustOpen((value) => !value)}
+            title="动作预览与隐私遮罩设置"
+          >
+            信任
+          </button>
+          <button
+            type="button"
             className="tool-btn"
             onClick={() => setLogOpen(true)}
           >
@@ -462,6 +741,27 @@ export default function App() {
           frame={frame}
           interactive={manualOpen}
           onManualAction={sendManual}
+          masks={masks}
+          masksEnabled={masksEnabled}
+          maskMode={maskMode}
+          onMaskCreate={(rect) => {
+            emitPrivacyMask({ action: 'add', rect });
+            setMaskMode(false);
+          }}
+          preview={
+            pendingAction
+              ? {
+                  kind: pendingAction.kind,
+                  target: previewTarget,
+                  summary: pendingAction.summary,
+                }
+              : null
+          }
+          onPreviewTargetChange={
+            pendingAction?.kind === 'point' || pendingAction?.kind === 'drag'
+              ? setPreviewTarget
+              : undefined
+          }
         />
         {!manualOpen && (
           <GestureLayer
@@ -486,6 +786,62 @@ export default function App() {
           />
         )}
         {plan && <PlanCard plan={plan} onClose={() => setPlan(null)} />}
+        {pendingAction && !pendingAction.decision_required && (
+          <ActionPreviewStrip
+            proposal={pendingAction}
+            onIntercept={() => decideAction(false)}
+            resolved={previewResolved}
+          />
+        )}
+        {pendingAction && pendingAction.decision_required && (
+          <ActionPreviewCard
+            proposal={pendingAction}
+            target={previewTarget}
+            resolved={previewResolved}
+            onTargetChange={setPreviewTarget}
+            onApprove={() => decideAction(true, previewTarget)}
+            onDeny={() => decideAction(false)}
+            onAllowToolAlways={() => {
+              updateTrustSettings({
+                overrides: { [pendingAction.tool]: 'auto' },
+              });
+              decideAction(true, previewTarget);
+            }}
+            onAllowTask={() => {
+              updateTrustSettings({ task_allow_all: true });
+              decideAction(true, previewTarget);
+            }}
+          />
+        )}
+        {trustOpen && (
+          <TrustPanel
+            settings={trust}
+            masks={masks}
+            masksEnabled={masksEnabled}
+            maskMode={maskMode}
+            suggestions={suggestions}
+            detecting={detecting}
+            detectNote={detectNote}
+            onUpdate={updateTrustSettings}
+            onToggleMaskMode={() => setMaskMode((value) => !value)}
+            onToggleMasks={(enabled) =>
+              emitPrivacyMask({ action: enabled ? 'enable' : 'disable' })
+            }
+            onDeleteMask={(id) => emitPrivacyMask({ action: 'remove', id })}
+            onClearMasks={() => emitPrivacyMask({ action: 'clear' })}
+            onDetect={runDetectSensitive}
+            onApplySuggestion={applySuggestion}
+            onApplyAllSuggestions={applyAllSuggestions}
+            onDismissSuggestions={() => {
+              setSuggestions([]);
+              setDetectNote(null);
+            }}
+            onClose={() => {
+              setTrustOpen(false);
+              setMaskMode(false);
+            }}
+          />
+        )}
         {manualOpen && (
           <ManualPanel
             onAction={sendManual}

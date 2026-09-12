@@ -10,12 +10,15 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from .. import __version__
+from ..asyncutil import run_in_thread
 from ..config import load_config, mask_secret, save_user_env
 from ..memory import default_memory_path
 from ..safety import default_patterns
 from ..skills import find_skill, resolve_skill_root
 from .auth import require_token
-from .state import reload_state
+from .pairing import PairingError
+from .sensitive import detect_sensitive_regions
+from .state import broadcast_control, reload_state
 
 
 class ConfigUpdate(BaseModel):
@@ -63,6 +66,17 @@ class EnabledUpdate(BaseModel):
     enabled: bool
 
 
+class PairRequest(BaseModel):
+    code: str
+
+
+class TrustUpdate(BaseModel):
+    mode: str | None = None
+    visual_delay_ms: int | None = None
+    overrides: dict[str, str | None] | None = None
+    task_allow_all: bool | None = None
+
+
 class COTUpdate(BaseModel):
     cot: str
 
@@ -106,6 +120,63 @@ def register(app) -> None:
     @router.get("/api/health")
     async def health():
         return {"ok": True, "service": "geass"}
+
+    @router.post("/api/pair")
+    async def pair_device(request: Request, payload: PairRequest):
+        """用一次性配对码换取访问 Token（二维码扫码入口）。"""
+        state = request.app.state.geass
+        client = request.client.host if request.client is not None else ""
+        try:
+            token = state.pairing.redeem(
+                payload.code,
+                state.config.server.token,
+                client=client,
+            )
+        except PairingError as exc:
+            headers = {"Retry-After": "60"} if exc.kind == "rate_limited" else None
+            status = {
+                "invalid": 401,
+                "used": 410,
+                "expired": 410,
+                "rate_limited": 429,
+            }.get(exc.kind, 401)
+            raise HTTPException(status_code=status, detail=str(exc), headers=headers) from exc
+        return {"token": token}
+
+    @router.get("/api/trust", dependencies=[Depends(require_token)])
+    async def get_trust(request: Request):
+        state = request.app.state.geass
+        return state.trust.settings()
+
+    @router.post("/api/trust", dependencies=[Depends(require_token)])
+    async def update_trust(request: Request, payload: TrustUpdate):
+        state = request.app.state.geass
+        try:
+            settings = state.trust.update(
+                mode=payload.mode,
+                visual_delay_ms=payload.visual_delay_ms,
+                overrides=payload.overrides,
+                task_allow_all=payload.task_allow_all,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await broadcast_control(state, {"type": "trust_changed", **settings})
+        return settings
+
+    @router.get("/api/privacy/masks", dependencies=[Depends(require_token)])
+    async def get_privacy_masks(request: Request):
+        state = request.app.state.geass
+        return state.masks.snapshot()
+
+    @router.post("/api/privacy/detect", dependencies=[Depends(require_token)])
+    async def detect_privacy_regions(request: Request):
+        state = request.app.state.geass
+        return await run_in_thread(
+            detect_sensitive_regions,
+            state.backend,
+            state.capture,
+            state.ocr,
+        )
 
     @router.get("/api/info", dependencies=[Depends(require_token)])
     async def info(request: Request):

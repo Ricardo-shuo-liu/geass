@@ -48,3 +48,27 @@ export function sendManualInput(ws: WebSocket, action: ManualAction): void {
     ws.send(JSON.stringify({ type: 'manual_input', ...action }));
   }
 }
+
+export function sendActionDecision(
+  ws: WebSocket,
+  id: string,
+  approved: boolean,
+  target?: Record<string, unknown>,
+): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'action_decision', id, approved, target }));
+  }
+}
+
+export function sendPrivacyMask(
+  ws: WebSocket,
+  payload:
+    | { action: 'add'; rect: { x: number; y: number; w: number; h: number } }
+    | { action: 'remove'; id: string }
+    | { action: 'clear' }
+    | { action: 'enable' | 'disable' | 'toggle' },
+): void {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'privacy_mask', ...payload }));
+  }
+}

@@ -22,3 +22,7 @@ decides whether a new low-level, general-purpose SKILL is justified and, if so,
 the result is written to `~/.geass/.skill/<name>/SKILL.md` and becomes available on the
 next command. Runs are spaced by `agent.evolution_interval` (1800s default)
 and capped at `agent.evolution_max_skills` (20 default) generated skills.
+
+Back up or migrate SKILLs with `geass export skill --all --to <dir>` or
+`geass export skill <name> --to <dir>`; attachments are copied too (see
+[Command line](cli.md)).

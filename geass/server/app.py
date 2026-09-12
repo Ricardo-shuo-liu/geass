@@ -72,6 +72,10 @@ def create_app(state: AppState) -> FastAPI:
             candidate = (DIST_DIR / full_path).resolve()
             if full_path and candidate.is_file() and candidate.is_relative_to(dist_root):
                 return FileResponse(candidate)
-            return FileResponse(DIST_DIR / "index.html")
+            # 前端每次构建都会更换 bundle 名；入口 HTML 禁止缓存，避免一直用到旧界面。
+            return FileResponse(
+                DIST_DIR / "index.html",
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
 
     return app

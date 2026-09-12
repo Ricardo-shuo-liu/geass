@@ -65,6 +65,10 @@ def register(app) -> None:
                     "expires_in": pending.expires_in,
                 }
             )
+        for action in state.approval_manager.pending_actions:
+            await ws.send_json(action.to_message())
+        await ws.send_json({"type": "privacy_masks_changed", **state.masks.snapshot()})
+        await ws.send_json({"type": "trust_changed", **state.trust.settings()})
         try:
             while True:
                 message = await ws.receive_json()
@@ -118,6 +122,53 @@ async def handle_control(state: AppState, ws: WebSocket, message: dict) -> None:
                     "message": "审核请求不存在或已处理",
                 }
             )
+    elif mtype == "action_decision":
+        action_id = str(message.get("id") or "")
+        approved = bool(message.get("approved"))
+        target = message.get("target")
+        if not await state.approval_manager.resolve_action(
+            action_id,
+            approved,
+            target if isinstance(target, dict) else None,
+        ):
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "message": "动作预览不存在或已处理",
+                }
+            )
+    elif mtype == "privacy_mask":
+        action = str(message.get("action") or "")
+        try:
+            if action == "add":
+                rect = message.get("rect")
+                if not isinstance(rect, dict):
+                    raise ValueError("需要 rect 参数")
+                state.masks.add(rect)
+            elif action == "remove":
+                mask_id = str(message.get("id") or "")
+                if not state.masks.remove(mask_id):
+                    raise ValueError("遮罩不存在")
+            elif action == "clear":
+                state.masks.clear()
+            elif action in ("enable", "disable", "toggle"):
+                enabled = state.masks.enabled
+                if action == "enable":
+                    enabled = True
+                elif action == "disable":
+                    enabled = False
+                else:
+                    enabled = not enabled
+                state.masks.set_enabled(enabled)
+            else:
+                raise ValueError(f"未知遮罩操作：{action}")
+        except ValueError as exc:
+            await ws.send_json({"type": "error", "message": str(exc)})
+        else:
+            await broadcast_control(
+                state,
+                {"type": "privacy_masks_changed", **state.masks.snapshot()},
+            )
     elif mtype == "manual_input":
         # 用户开始手动直控时接管：若 Agent 仍在运行则请求它退出。
         if state.agent_task and not state.agent_task.done() and state.cancel_event is not None:
@@ -170,6 +221,7 @@ async def start_agent(state: AppState, text: str) -> asyncio.Task[dict] | None:
         state.evolution.record_task(text)
 
     state.cancel_event = asyncio.Event()
+    state.trust.begin_task()
 
     async def run_and_report() -> dict:
         try:

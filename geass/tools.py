@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -106,6 +107,8 @@ async def _key_press(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
 
 async def _review_command(agent: Any, command: str, tool: str) -> dict[str, Any] | None:
     """高危命令走人工审核通道；允许时返回 None，拒绝时返回错误 dict。"""
+    if PREAPPROVED.get():
+        return None
     if agent.security is None or not command.strip():
         return None
     verdict = evaluate_command(command, agent.security.patterns)
@@ -965,3 +968,176 @@ TEXT_ONLY_TOOLS: set[str] = {name for name, tool in TOOL_REGISTRY.items() if too
 STATE_CHANGING_TOOLS: set[str] = {
     name for name, tool in TOOL_REGISTRY.items() if tool.state_changing
 }
+
+PREAPPROVED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "geass_tool_preapproved", default=False
+)
+
+# 幽灵操作预览：工具 -> 可视化种类。MCP 工具统一走 generic。
+PREVIEW_SPECS: dict[str, str] = {
+    "move": "point",
+    "click": "point",
+    "double_click": "point",
+    "right_click": "point",
+    "drag": "drag",
+    "scroll": "scroll",
+    "type_text": "text",
+    "key_press": "key",
+    "open_terminal": "command",
+    "terminal_type": "terminal",
+    "terminal_close": "terminal",
+    "browser": "url",
+}
+
+
+def preview_kind(tool: str) -> str | None:
+    name = str(tool or "")
+    if name.startswith("mcp__"):
+        return "generic"
+    return PREVIEW_SPECS.get(name)
+
+
+def _clamp01(value: Any, default: float = 0.5) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    return min(1.0, max(0.0, number))
+
+
+def _short(value: Any, limit: int = 60) -> str:
+    text = str(value or "").replace("\n", " ").strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def build_preview(tool: str, args: dict[str, Any]) -> dict[str, Any] | None:
+    """按工具生成预览元数据；不参与预览的工具返回 None。"""
+    kind = preview_kind(tool)
+    if kind is None:
+        return None
+    data = args or {}
+    if kind == "point":
+        target = {"x": _clamp01(data.get("x")), "y": _clamp01(data.get("y"))}
+        button = str(data.get("button") or "left")
+        label = {
+            "move": "移动鼠标到",
+            "click": "单击",
+            "double_click": "双击",
+            "right_click": "右键单击",
+        }.get(tool, "操作")
+        summary = f"{label} ({target['x']:.2f}, {target['y']:.2f})"
+        if tool == "click" and button != "left":
+            summary += f" · {button}"
+        return {"kind": kind, "target": target, "summary": summary}
+    if kind == "drag":
+        target = {
+            "x1": _clamp01(data.get("x1")),
+            "y1": _clamp01(data.get("y1")),
+            "x2": _clamp01(data.get("x2")),
+            "y2": _clamp01(data.get("y2")),
+        }
+        summary = (
+            f"拖拽 ({target['x1']:.2f}, {target['y1']:.2f}) → "
+            f"({target['x2']:.2f}, {target['y2']:.2f})"
+        )
+        return {"kind": kind, "target": target, "summary": summary}
+    if kind == "scroll":
+        dx = max(-50, min(50, int(data.get("dx") or 0)))
+        dy = max(-50, min(50, int(data.get("dy") or 0)))
+        return {
+            "kind": kind,
+            "target": {"dx": dx, "dy": dy},
+            "summary": f"滚动 dx={dx} dy={dy}",
+        }
+    if kind == "text":
+        text = str(data.get("text") or "")
+        return {
+            "kind": kind,
+            "target": {"text": text},
+            "summary": f"输入文本：{_short(text)}",
+        }
+    if kind == "key":
+        combo = str(data.get("combo") or "")
+        return {
+            "kind": kind,
+            "target": {"combo": combo},
+            "summary": f"按键：{_short(combo, 30)}",
+        }
+    if kind == "command":
+        command = str(data.get("command") or "")
+        summary = f"终端命令：{_short(command)}" if command else "打开空白终端"
+        return {
+            "kind": kind,
+            "target": {"command": command},
+            "summary": summary,
+        }
+    if kind == "terminal":
+        if tool == "terminal_close":
+            return {
+                "kind": kind,
+                "target": {"session_id": str(data.get("session_id") or "")},
+                "summary": "关闭终端会话",
+            }
+        text = str(data.get("text") or "")
+        return {
+            "kind": kind,
+            "target": {
+                "session_id": str(data.get("session_id") or ""),
+                "text": text,
+                "press_enter": bool(data.get("press_enter")),
+            },
+            "summary": f"终端输入：{_short(text)}" + (" + 回车" if data.get("press_enter") else ""),
+        }
+    if kind == "url":
+        action = str(data.get("action") or "open")
+        url = str(data.get("url") or "")
+        return {
+            "kind": kind,
+            "target": {"action": action, "url": url},
+            "summary": f"浏览器 {action}：{_short(url, 80)}",
+        }
+    return {
+        "kind": "generic",
+        "target": {"args": dict(data)},
+        "summary": f"调用工具 {_short(tool, 40)}",
+    }
+
+
+def apply_preview_target(tool: str, args: dict[str, Any], target: dict[str, Any]) -> dict[str, Any]:
+    """把用户修正后的 target 合并回工具参数（按 kind 校验/钳制）。"""
+    kind = preview_kind(tool)
+    merged = dict(args or {})
+    if not kind or not isinstance(target, dict):
+        return merged
+    if kind == "point":
+        if "x" in target:
+            merged["x"] = _clamp01(target.get("x"))
+        if "y" in target:
+            merged["y"] = _clamp01(target.get("y"))
+    elif kind == "drag":
+        for key in ("x1", "y1", "x2", "y2"):
+            if key in target:
+                merged[key] = _clamp01(target.get(key))
+    elif kind == "scroll":
+        if "dx" in target:
+            merged["dx"] = max(-50, min(50, int(target.get("dx") or 0)))
+        if "dy" in target:
+            merged["dy"] = max(-50, min(50, int(target.get("dy") or 0)))
+    elif kind in ("text", "command"):
+        key = "text" if kind == "text" else "command"
+        if key in target:
+            merged[key] = str(target.get(key) or "")[:2000]
+    elif kind == "key":
+        if "combo" in target:
+            merged["combo"] = str(target.get("combo") or "")[:128]
+    elif kind == "terminal":
+        if "text" in target:
+            merged["text"] = str(target.get("text") or "")[:2000]
+        if "press_enter" in target:
+            merged["press_enter"] = bool(target.get("press_enter"))
+    elif kind == "url":
+        if "url" in target:
+            merged["url"] = str(target.get("url") or "")[:2048]
+        if "action" in target and str(target.get("action")) in ("open", "new_tab", "new_window"):
+            merged["action"] = str(target.get("action"))
+    return merged

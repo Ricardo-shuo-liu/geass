@@ -41,6 +41,7 @@ class ServerConfig:
     host: str = "0.0.0.0"
     port: int = 8765
     token: str = ""
+    public_url: str = ""
 
 
 @dataclass
@@ -208,6 +209,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     p_voice = _section(project, "voice")
     u_agent = _section(user, "agent")
     u_security = _section(user, "security")
+    u_server = _section(user, "server")
 
     def pick(section: dict[str, Any], key: str, default: Any) -> Any:
         return section.get(key, default)
@@ -217,6 +219,13 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
     token = os.environ.get("GEASS_TOKEN") or str(pick(p_server, "token", "") or "")
     if not token:
         token = secrets.token_urlsafe(9)
+    public_url = str(
+        os.environ.get(
+            "GEASS_PUBLIC_URL",
+            pick(u_server, "public_url", pick(p_server, "public_url", "")),
+        )
+        or ""
+    ).rstrip("/")
 
     model = os.environ.get(
         "GEASS_MODEL",
@@ -600,6 +609,7 @@ def load_config(path: str | Path | None = None, persist: bool = False) -> Config
             host=str(pick(p_server, "host", "0.0.0.0")),
             port=int(pick(p_server, "port", 8765)),
             token=token,
+            public_url=public_url,
         ),
         screen=ScreenConfig(
             fps=max(1, int(pick(p_screen, "fps", 15))),
@@ -890,6 +900,10 @@ def main() -> None:
         help="是否启用高危 shell 命令审核",
     )
     set_parser.add_argument("--approval-timeout", type=float, help="命令审核超时秒数（最低 5 秒）")
+    set_parser.add_argument(
+        "--public-url",
+        help="扫码配对的公网地址，如 https://geass.example.com（留空则用局域网 IP）",
+    )
 
     args = parser.parse_args()
     if args.command == "show":
@@ -963,9 +977,10 @@ def main() -> None:
             f"patterns={len(config.security.patterns)}"
         )
         print("token     = 每次启动随机生成（启动时在控制台打印）")
+        print(f"public_url= {config.server.public_url or '（未设置，扫码使用局域网地址）'}")
         return
 
-    updates: dict[str, dict[str, Any]] = {"agent": {}, "security": {}}
+    updates: dict[str, dict[str, Any]] = {"agent": {}, "security": {}, "server": {}}
     positional_keys = ("api_key", "base_url", "model")
     for index, value in enumerate(args.values):
         if index < len(positional_keys) and value:
@@ -1060,7 +1075,9 @@ def main() -> None:
         updates["security"]["enabled"] = args.security_enabled == "true"
     if args.approval_timeout is not None:
         updates["security"]["approval_timeout"] = max(5.0, float(args.approval_timeout))
-    if not updates["agent"] and not updates["security"]:
+    if args.public_url is not None:
+        updates["server"]["public_url"] = str(args.public_url).strip().rstrip("/")
+    if not any(updates.values()):
         parser.error("请至少提供一个 --xxx 参数")
     path = save_user_env(updates)
     print(f"已写入 {path}")

@@ -141,6 +141,22 @@ without promising fixes. The full design and roadmap live in
   `task_id`, making it hard for the phone UI to tell which task a request came
   from.
 
+## Trust layer (action preview & privacy masks)
+
+- The visual delay only makes actions observable and interceptable; it is not a
+  transactional boundary. At 0ms or in "allow all" mode there is no preview
+  step (the terminal blocklist review still applies).
+- Confirmation-required actions are rejected when no phone control client is
+  connected; unattended background/scheduled tasks should use "allow all" or
+  keep the phone online.
+- Privacy masks only cover the primary monitor and never block input; they are
+  skipped entirely while the master switch is off.
+- Auto-detection is on-demand and relies on AT-SPI password fields plus OCR
+  keyword matches; custom-drawn UIs, a missing OCR token or unmatched keywords
+  cause misses. Suggestions are best-effort, never automatic redaction.
+- This phase has no undo or session replay; `action_proposal.undoable` is
+  always false.
+
 ## Memory, RAG, SKILL, and evolution
 
 - Persistent memory is key-value plus keyword retrieval, with no semantic/vector
@@ -172,6 +188,12 @@ without promising fixes. The full design and roadmap live in
 
 ## Security, privacy, and audit
 
+- QR pairing exchanges a short-lived single-use code (300s default) for the
+  Token; once expired or consumed you must restart with `--qr` or type the
+  Token manually, as there is no runtime re-issue endpoint.
+- On plain-HTTP LAN the pairing code and Token can be sniffed by the same
+  network segment; use Tailscale/HTTPS off-LAN. The Token lives in
+  `sessionStorage` (cleared when the tab closes) but XSS could still read it.
 - The service listens on an HTTP LAN port by default and has no built-in TLS.
   Screenshots are sent to the configured model provider; with OCR enabled they
   are also uploaded to AI Studio. There is currently no local OCR or

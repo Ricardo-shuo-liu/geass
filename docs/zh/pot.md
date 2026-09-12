@@ -20,5 +20,9 @@ geass pot rot show <name>
 geass pot rot disable|enable|delete <name>
 ```
 
+导出 COT/ROT：`geass export cot --to <dir>`、`geass export rot <name> --to <dir>`
+或 `geass export rot --all --to <dir>`（默认包含停用项，`--enabled-only`
+只导出启用中的 ROT）；详见 [命令行](cli.md)。
+
 Agent 也提供 `pot_list` / `pot_use` 工具；配置项见
 [configuration.md](configuration.md) 的 `pot_*`。

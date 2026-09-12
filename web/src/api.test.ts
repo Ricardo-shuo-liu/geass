@@ -4,10 +4,15 @@ import {
   addMcpServer,
   apiInfo,
   deleteMcpServer,
+  detectSensitiveRegions,
+  getPrivacyMasks,
+  getTrust,
+  pairDevice,
   setMcpToolEnabled,
   stopAgent,
   testMcpServer,
   transcribe,
+  updateTrust,
 } from './api';
 
 interface FetchResponse {
@@ -45,6 +50,32 @@ describe('api', () => {
     stubFetch({ ok: false, status: 401, json: async () => ({}) });
 
     await expect(apiInfo('bad')).rejects.toThrow('连接失败（HTTP 401）');
+  });
+
+  it('exchanges a pairing code for a token', async () => {
+    const fetchMock = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ token: 'tok-2' }),
+    });
+
+    const token = await pairDevice('pair-code');
+    const [url, init] = fetchMock.mock.calls[0];
+
+    expect(url).toBe('/api/pair');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ code: 'pair-code' });
+    expect(token).toBe('tok-2');
+  });
+
+  it('surfaces pairing errors from the server', async () => {
+    stubFetch({
+      ok: false,
+      status: 410,
+      json: async () => ({ detail: '配对码已过期' }),
+    });
+
+    await expect(pairDevice('expired')).rejects.toThrow('配对码已过期');
   });
 
   it('stops the agent via POST', async () => {
@@ -129,5 +160,59 @@ describe('api', () => {
     await expect(testMcpServer('tok', 'broken')).rejects.toThrow(
       '服务器未通过测试，不能启用',
     );
+  });
+
+  it('reads and updates trust settings', async () => {
+    const fetchMock = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        mode: 'smart',
+        visual_delay_ms: 600,
+        overrides: {},
+        task_allow_all: false,
+      }),
+    });
+
+    await getTrust('tok');
+    await updateTrust('tok', { mode: 'confirm' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/trust');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/trust');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      mode: 'confirm',
+    });
+  });
+
+  it('reads privacy masks', async () => {
+    const fetchMock = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({ enabled: false, masks: [] }),
+    });
+
+    const snapshot = await getPrivacyMasks('tok');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/privacy/masks');
+    expect(snapshot).toEqual({ enabled: false, masks: [] });
+  });
+
+  it('requests sensitive region detection', async () => {
+    const fetchMock = stubFetch({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        regions: [],
+        sources: { password_fields: 0, keyword_matches: 0 },
+        keywords: ['密码'],
+      }),
+    });
+
+    const result = await detectSensitiveRegions('tok');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/privacy/detect');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(result.keywords).toEqual(['密码']);
   });
 });

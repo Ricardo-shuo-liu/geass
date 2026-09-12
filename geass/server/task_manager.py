@@ -146,6 +146,8 @@ class BackgroundTaskManager:
             self._save()
 
         status_cb = self._make_status_cb(task.id)
+        if getattr(self.state, "trust", None) is not None:
+            self.state.trust.begin_task()
         agent = (
             self.agent_factory()
             if self.agent_factory is not None

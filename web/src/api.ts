@@ -1,6 +1,13 @@
 const TOKEN_HEADER = 'X-GEASS-Token';
 
-import type { McpAddInput, McpServerResource, ResourceSummary } from './types';
+import type {
+  McpAddInput,
+  McpServerResource,
+  PrivacyMask,
+  ResourceSummary,
+  SensitiveDetectResult,
+  TrustSettings,
+} from './types';
 
 export async function apiInfo(token: string): Promise<unknown> {
   const res = await fetch('/api/info', { headers: { [TOKEN_HEADER]: token } });
@@ -8,6 +15,75 @@ export async function apiInfo(token: string): Promise<unknown> {
     throw new Error(`连接失败（HTTP ${res.status}），请检查 Token`);
   }
   return res.json();
+}
+
+export async function pairDevice(code: string): Promise<string> {
+  const res = await fetch('/api/pair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    let detail = `配对失败（HTTP ${res.status}）`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // 保留默认错误信息
+    }
+    throw new Error(detail);
+  }
+  const body = (await res.json()) as { token?: string };
+  if (!body.token) throw new Error('配对失败：服务器未返回 Token');
+  return body.token;
+}
+
+export async function getTrust(token: string): Promise<TrustSettings> {
+  const res = await fetch('/api/trust', { headers: { [TOKEN_HEADER]: token } });
+  if (!res.ok) throw new Error(`读取信任设置失败（HTTP ${res.status}）`);
+  return (await res.json()) as TrustSettings;
+}
+
+export async function updateTrust(
+  token: string,
+  patch: {
+    mode?: TrustSettings['mode'];
+    visual_delay_ms?: number;
+    overrides?: Record<string, 'auto' | 'confirm' | null>;
+    task_allow_all?: boolean;
+  },
+): Promise<TrustSettings> {
+  const res = await fetch('/api/trust', {
+    method: 'POST',
+    headers: {
+      [TOKEN_HEADER]: token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`更新信任设置失败（HTTP ${res.status}）`);
+  return (await res.json()) as TrustSettings;
+}
+
+export async function getPrivacyMasks(
+  token: string,
+): Promise<{ enabled: boolean; masks: PrivacyMask[] }> {
+  const res = await fetch('/api/privacy/masks', {
+    headers: { [TOKEN_HEADER]: token },
+  });
+  if (!res.ok) throw new Error(`读取遮罩失败（HTTP ${res.status}）`);
+  return (await res.json()) as { enabled: boolean; masks: PrivacyMask[] };
+}
+
+export async function detectSensitiveRegions(
+  token: string,
+): Promise<SensitiveDetectResult> {
+  const res = await fetch('/api/privacy/detect', {
+    method: 'POST',
+    headers: { [TOKEN_HEADER]: token },
+  });
+  if (!res.ok) throw new Error(`自动识别失败（HTTP ${res.status}）`);
+  return (await res.json()) as SensitiveDetectResult;
 }
 
 export async function stopAgent(token: string): Promise<void> {

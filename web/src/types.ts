@@ -5,6 +5,7 @@ export type AgentState =
   | 'acting'
   | 'acted'
   | 'awaiting_approval'
+  | 'awaiting_action'
   | 'done'
   | 'error'
   | 'cancelled'
@@ -54,6 +55,89 @@ export interface ApprovalResolved {
   _time?: string;
 }
 
+export interface PrivacyMask {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface PrivacyMasksChanged {
+  type: 'privacy_masks_changed';
+  enabled: boolean;
+  masks: PrivacyMask[];
+  _time?: string;
+}
+
+export interface SensitiveRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  source: 'password' | 'keyword';
+  label: string;
+}
+
+export interface SensitiveDetectResult {
+  regions: SensitiveRegion[];
+  sources: { password_fields: number; keyword_matches: number };
+  keywords: string[];
+}
+
+export type PreviewMode = 'smart' | 'confirm' | 'off';
+
+export interface TrustSettings {
+  mode: PreviewMode;
+  visual_delay_ms: number;
+  overrides: Record<string, 'auto' | 'confirm'>;
+  task_allow_all: boolean;
+}
+
+export interface TrustChanged extends TrustSettings {
+  type: 'trust_changed';
+  _time?: string;
+}
+
+export type ActionKind =
+  | 'point'
+  | 'drag'
+  | 'scroll'
+  | 'text'
+  | 'key'
+  | 'command'
+  | 'terminal'
+  | 'url'
+  | 'generic';
+
+export interface ActionProposal {
+  type: 'action_proposal';
+  id: string;
+  tool: string;
+  kind: ActionKind;
+  target: Record<string, unknown>;
+  summary: string;
+  decision_required: boolean;
+  delay_ms: number;
+  step: number;
+  total_steps: number;
+  plan_goal?: string;
+  security_reason?: string;
+  undoable: boolean;
+  expires_in: number;
+  task_id?: string;
+  _time?: string;
+}
+
+export interface ActionResolved {
+  type: 'action_resolved';
+  id: string;
+  approved: boolean;
+  auto: boolean;
+  reason?: string;
+  _time?: string;
+}
+
 export interface EvolutionStatus {
   type: 'evolution_status';
   created: boolean;
@@ -93,6 +177,10 @@ export type ControlEvent =
   | AgentResult
   | ApprovalRequest
   | ApprovalResolved
+  | PrivacyMasksChanged
+  | TrustChanged
+  | ActionProposal
+  | ActionResolved
   | EvolutionStatus
   | ScheduleStatus
   | ServerError;

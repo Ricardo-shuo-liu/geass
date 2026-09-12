@@ -76,6 +76,7 @@ Environment variables:
 | `GEASS_MODEL` | Overrides `agent.model` |
 | `GEASS_VISION_WHITELIST` | Comma-separated vision-model whitelist; overrides `agent.vision_whitelist` |
 | `GEASS_TOKEN` | Optional: pin the Token (otherwise random per startup) |
+| `GEASS_PUBLIC_URL` | Overrides `server.public_url`: public base URL used by QR pairing (Tailscale/Cloudflare domain) |
 | `GEASS_PADDLEOCR_TOKEN` | AI Studio OCR token (falls back to `PADDLEOCR_MCP_AISTUDIO_ACCESS_TOKEN`) |
 | `GEASS_PADDLEOCR_MODEL` | Overrides `agent.ocr_model` |
 | `GEASS_PADDLEOCR_BASE_URL` | Overrides `agent.ocr_base_url` |
@@ -86,5 +87,6 @@ Environment variables:
 Precedence: **env vars > `~/.geass/env.toml` > `config.toml` > defaults**.
 
 - `GEASS_*` env vars used at startup are auto-saved to `~/.geass/env.toml` (mode 0600);
+- QR pairing uses `server.public_url` when set, otherwise the first LAN IPv4; configure with `python -m geass.config set --public-url https://your-domain` for remote access;
 - CLI: `python -m geass.config show` (secrets masked); `python -m geass.config set sk-... https://api.deepseek.com deepseek-v4-flash --vision false`; OCR: `python -m geass.config set --ocr-token ... --ocr-model PaddleOCR-VL-1.6`; vision whitelist: `--vision-whitelist gpt-4o,deepseek-v4-flash`; memory: `--memory-enabled false` / `--memory-path ...`; skills & evolution: `--skill-root ...` / `--evolution-enabled false` / `--evolution-idle-seconds 600`; safety: `--security-enabled false` / `--approval-timeout 60`;
 - Runtime API: `GET /api/config` (masked) and `POST /api/config` (e.g. `{"model":"...","base_url":"...","api_key":"...","vision":false}`) — applied and persisted immediately.

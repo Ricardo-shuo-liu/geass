@@ -19,17 +19,20 @@ codenamed **Paisley-Park**.
 ## Features
 
 - Live screen streaming and remote access (Tailscale / Cloudflare quick tunnel)
+- QR pairing: `geass serve --qr` prints a single-use code so the phone connects without typing URL or Token
 - Text and voice commands (Web Speech API with whisper-1 fallback)
 - Vision Agent: "screenshot → model → act → verify" loop with PaddleOCR text-mode fallback
 - Self-assessed task system: `plan`, multi-channel verification and automatic approach switching
 - Semantic grounding: `find_text` / `find_element` / `window_info`
 - Manual direct control: touch screen plus virtual mouse touchpad and keyboard rendered in the PWA, no model in the loop
+- Trust layer: ghost action previews (on-screen markers, step progress, tiered review or one-tap allow) and privacy masks redacting stream and model screenshots
 - Scheduled tasks: created conversationally from temporal prompts; long-term jobs persist after user confirmation
 - RAG retrieval: register local files/folders as sources with vector or local lexical search injected into tasks
 - MCP tools: import stdio or Streamable HTTP tools from the UI or CLI, auto-test on import, and manage each server/tool independently
 - POT reflection: distills a Global-COT and role ROT templates from task traces
 - CIL terminal assistant: GUI-independent light/deliberate modes reusing all assets
-- Unified CLI: `geass serve/cli/rag/mcp/config/check/pot/reset/commands`
+- Asset export: `geass export` backs up selected or all SKILL / COT / ROT assets
+- Unified CLI: `geass serve/cli/export/rag/mcp/config/check/pot/reset/commands`
 - Phone resource manager: visual management of memory, MCP, RAG, SKILLs, POT and scheduled tasks
 - Background tasks: run in parallel with the foreground agent (GUI actions serialized by a global input lock)
 - Context compression: long tasks auto-summarize early messages with originals archived
@@ -70,10 +73,13 @@ python -m geass.config set --ocr-token YOUR_TOKEN
 ### 3. Start
 
 ```bash
-./scripts/run.sh
+./scripts/run.sh            # normal start
+./scripts/run.sh --qr       # start and print a pairing QR code
 ```
 
-The terminal prints the phone URL and a fresh random Token.
+The terminal prints the phone URL and a fresh random Token. With `--qr` it also
+prints a QR code (valid for 5 minutes, single use): scan it to open the control
+UI and connect without typing the URL or Token.
 
 ### 4. Connect the phone
 

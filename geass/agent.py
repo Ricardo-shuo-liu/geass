@@ -9,10 +9,11 @@ import logging
 import os
 import platform
 import random
+import secrets
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai import AsyncOpenAI
 
@@ -28,11 +29,17 @@ from .screen import ScreenCapture, image_difference
 from .skills import Skill, catalog_text
 from .tasks import TaskPlan
 from .tools import (
+    PREAPPROVED,
     STATE_CHANGING_TOOLS,
     TEXT_ONLY_TOOLS,
     TOOL_REGISTRY,
     TOOLS,
+    apply_preview_target,
+    build_preview,
 )
+
+if TYPE_CHECKING:
+    from .server.trust import TrustManager
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +171,7 @@ class Agent:
         background_starter: Any = None,
         compression_path: str | None = None,
         mcp: MCPManager | None = None,
+        trust: TrustManager | None = None,
     ) -> None:
         self.client = client
         self.backend = backend
@@ -192,6 +200,8 @@ class Agent:
         self.background_starter = background_starter
         self.compression_path = compression_path
         self.mcp = mcp
+        self.trust = trust
+        self.last_action_meta: dict[str, Any] | None = None
         self._compress_watermark = 1
 
     def resolve_vision(self) -> bool:
@@ -234,25 +244,36 @@ class Agent:
         cy = min(1.0, max(0.0, float(y)))
         return round(cx * width), round(cy * height)
 
-    async def _execute(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
-        if self.mcp is not None:
-            result = await self.mcp.call(name, args)
-            if result is not None:
-                return result
-        tool = TOOL_REGISTRY.get(name)
-        if tool is None:
-            return {"ok": False, "error": f"未知工具：{name}"}
+    async def _execute(
+        self,
+        name: str,
+        args: dict[str, Any],
+        *,
+        preapproved: bool = False,
+    ) -> dict[str, Any]:
+        token = PREAPPROVED.set(True) if preapproved else None
         try:
-            return await tool.handler(self, args)
-        except (
-            InputError,
-            TerminalError,
-            BrowserError,
-            KeyError,
-            TypeError,
-            ValueError,
-        ) as exc:
-            return {"ok": False, "error": f"{name} 执行失败：{exc}"}
+            if self.mcp is not None:
+                result = await self.mcp.call(name, args)
+                if result is not None:
+                    return result
+            tool = TOOL_REGISTRY.get(name)
+            if tool is None:
+                return {"ok": False, "error": f"未知工具：{name}"}
+            try:
+                return await tool.handler(self, args)
+            except (
+                InputError,
+                TerminalError,
+                BrowserError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                return {"ok": False, "error": f"{name} 执行失败：{exc}"}
+        finally:
+            if token is not None:
+                PREAPPROVED.reset(token)
 
     def _plan_result(self, args: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -594,15 +615,106 @@ class Agent:
             "screen_change_ratio": round(float(ratio), 4),
         }
 
+    async def _preview_action(
+        self,
+        name: str,
+        args: dict[str, Any],
+        *,
+        step: int,
+    ) -> tuple[dict[str, Any], str | None, bool, str]:
+        """按可信设置生成预览；返回 (实际参数, 拒绝原因, 是否预审核, proposal_id)。"""
+        preview = build_preview(name, args)
+        if preview is None or self.trust is None:
+            return args, None, False, ""
+        settings = self.trust.settings()
+        if settings.get("mode") == "off":
+            return args, None, False, ""
+
+        security_reason = ""
+        command = ""
+        if name == "open_terminal":
+            command = str(args.get("command") or "")
+        elif name == "terminal_type":
+            command = str(args.get("text") or "")
+        if command and self.security is not None and self.security.enabled:
+            from .safety import evaluate_command
+
+            verdict = evaluate_command(command, self.security.patterns)
+            if verdict.blocked:
+                security_reason = verdict.reason
+        may_execute = False
+        if name == "terminal_type":
+            text = str(args.get("text") or "")
+            may_execute = bool(args.get("press_enter")) or "\n" in text or "\r" in text
+        decision_required = self.trust.requires_confirmation(
+            name,
+            security_blocked=bool(security_reason),
+            may_execute=may_execute,
+            command_present=bool(command.strip()),
+        )
+        plan = self.plan
+        from .server.approval import PendingAction
+
+        proposal = PendingAction(
+            id=secrets.token_hex(6),
+            tool=name,
+            kind=str(preview["kind"]),
+            target=dict(preview["target"]),
+            summary=str(preview["summary"]),
+            decision_required=decision_required,
+            delay_ms=0 if decision_required else int(settings.get("visual_delay_ms") or 0),
+            step=int(step),
+            total_steps=len(plan.steps) if plan is not None else 0,
+            plan_goal=plan.goal if plan is not None else "",
+            security_reason=security_reason,
+            expires_in=float(getattr(self.approval_gateway, "default_timeout", 30.0)),
+        )
+        if decision_required:
+            await self._emit(
+                "awaiting_action",
+                step=step,
+                tool=name,
+                message=f"等待确认：{proposal.summary}",
+            )
+        if self.approval_gateway is None:
+            if decision_required:
+                return args, "动作预览通道不可用，已拒绝执行", False, proposal.id
+            return args, None, False, proposal.id
+        decision = await self.approval_gateway.request_action(proposal)
+        if not decision.get("approved"):
+            return (
+                args,
+                str(decision.get("reason") or "动作被拒绝"),
+                False,
+                proposal.id,
+            )
+        actual = dict(args)
+        target = decision.get("target")
+        if isinstance(target, dict):
+            actual = apply_preview_target(name, actual, target)
+        return actual, None, bool(security_reason), proposal.id
+
     async def _guarded_action(
-        self, name: str, args: dict[str, Any]
+        self, name: str, args: dict[str, Any], step: int = 0
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         """执行工具；键鼠类动作在全局输入锁内串行。"""
+        actual_args, denied, preapproved, proposal_id = await self._preview_action(
+            name, args, step=step
+        )
+        preview = build_preview(name, args)
+        self.last_action_meta = {
+            "proposal_id": proposal_id,
+            "args": dict(actual_args),
+            "summary": str(preview["summary"]) if preview else "",
+        }
+        if denied is not None:
+            return {"ok": False, "error": f"动作预览被拒绝：{denied}"}, None
+
         if name in STATE_CHANGING_TOOLS:
 
             async def run_with_capture():
                 before = self._capture_change_before()
-                result = await self._execute(name, args)
+                result = await self._execute(name, actual_args, preapproved=preapproved)
                 change = await self._capture_change_after(before) if before is not None else None
                 return result, change
 
@@ -610,7 +722,7 @@ class Agent:
                 async with self.input_lock:
                     return await run_with_capture()
             return await run_with_capture()
-        return await self._execute(name, args), None
+        return await self._execute(name, actual_args, preapproved=preapproved), None
 
     async def _maybe_compress(self, messages: list[dict[str, Any]]) -> None:
         if not self.config.context_compress_enabled:
@@ -716,6 +828,7 @@ class Agent:
             "command": command,
             "plan": None,
             "tools": [],
+            "actions": [],
             "result": None,
         }
         self._compress_watermark = 1
@@ -821,11 +934,20 @@ class Agent:
                 await self._emit("acting", step=step, tool=name, message=f"执行工具 {name}…")
                 self.last_trace["tools"].append(name)
                 try:
-                    result, change = await self._guarded_action(name, args)
+                    result, change = await self._guarded_action(name, args, step)
                 except Exception as exc:
                     logger.warning("工具 %s 执行异常：%s", name, exc)
                     result = {"ok": False, "error": f"{name} 执行异常：{exc}"}
                     change = None
+                meta = self.last_action_meta or {}
+                if meta.get("proposal_id"):
+                    self.last_trace.setdefault("actions", []).append(
+                        {
+                            "tool": name,
+                            "proposal_id": meta.get("proposal_id"),
+                            "args": meta.get("args"),
+                        }
+                    )
                 if change is not None:
                     result = {**result, **change}
                     if not change["screen_changed"]:
@@ -845,6 +967,8 @@ class Agent:
                     step=step,
                     tool=name,
                     message=result.get("message") or result.get("error", ""),
+                    proposal_id=meta.get("proposal_id") or None,
+                    args=meta.get("args") or None,
                 )
                 if name == "plan" and result.get("ok"):
                     await self._emit(

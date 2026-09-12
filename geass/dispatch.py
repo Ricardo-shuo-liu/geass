@@ -1,4 +1,4 @@
-"""Geass 统一命令入口：geass [serve|cli|rag|config|check|pot|reset|commands|help]。"""
+"""Geass 统一命令入口：geass [serve|cli|export|rag|config|check|pot|reset|commands|help]。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import sys
 from pathlib import Path
 
 COMMANDS = {
-    "serve": "启动 Geass 服务（无参数时默认执行）",
+    "serve": "启动 Geass 服务（默认命令；--qr 打印扫码配对二维码）",
     "cli": "启动 CLI 终端助手（light/deliberate 双模式）",
+    "export": "导出 SKILL / COT / ROT 资产到指定目录",
     "rag": "管理 RAG 数据源（add/list/remove/enable/disable/reindex）",
     "config": "查看/修改配置（python -m geass.config 的别名）",
     "check": "环境自检",
@@ -67,8 +68,8 @@ def main(argv: list[str] | None = None) -> None:
     args, remaining = parser.parse_known_args(argv)
     command = args.command or "serve"
     if command == "serve":
-        # 避免 geass.main 的参数守卫把子命令名当作多余参数
-        sys.argv = [sys.argv[0]]
+        # 透传 --qr / --qr-ttl 等服务参数
+        sys.argv = [sys.argv[0], *remaining]
         from .main import main as serve_main
 
         serve_main()
@@ -77,6 +78,12 @@ def main(argv: list[str] | None = None) -> None:
         from .cli.__main__ import main as cli_main
 
         cli_main()
+        return
+    if command == "export":
+        from .export import main as export_main
+
+        sys.argv = [sys.argv[0], *remaining]
+        export_main()
         return
     if command == "rag":
         from .rag.__main__ import main as rag_main

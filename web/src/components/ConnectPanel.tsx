@@ -49,6 +49,9 @@ export function ConnectPanel({ connecting, error, onConnect }: Props) {
           {connecting ? 'CONNECTING…' : 'CONNECT'}
         </button>
         {error && <div className="error">{error}</div>}
+        <p className="connect-hint">
+          也可以在电脑终端运行 <code>geass serve --qr</code>，用手机扫码自动连接
+        </p>
       </form>
     </div>
   );

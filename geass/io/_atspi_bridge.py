@@ -142,6 +142,87 @@ def main() -> None:
         print(json.dumps({"ok": True, "windows": windows[:limit]}, ensure_ascii=False))
         return
 
+    if args.get("op") == "sensitive":
+        limit = max(1, min(int(args.get("limit") or 10), 50))
+        timeout = max(0.1, float(args.get("timeout") or 3.0))
+        try:
+            desktop = pyatspi.Registry.getDesktop(0)
+        except Exception as exc:
+            print(json.dumps({"ok": False, "error": f"无法连接 AT-SPI 无障碍总线：{exc}"}))
+            return
+
+        fields: list[dict[str, object]] = []
+        seen_sensitive: set[int] = set()
+        deadline = time.monotonic() + timeout
+        desktop_coords = getattr(pyatspi, "DESKTOP_COORDS", 0)
+
+        def is_sensitive(node: object, role_name: str) -> bool:
+            if "password" in role_name.casefold():
+                return True
+            try:
+                attributes = node.getAttributes() or []  # type: ignore[attr-defined]
+            except Exception:
+                return False
+            for item in attributes:
+                text = str(item).casefold()
+                if text.startswith("protected:") and text.split(":", 1)[1].strip() in (
+                    "true",
+                    "1",
+                    "yes",
+                ):
+                    return True
+            return False
+
+        def walk_sensitive(node: object) -> None:
+            if len(fields) >= limit or time.monotonic() >= deadline:
+                return
+            marker = id(node)
+            if marker in seen_sensitive:
+                return
+            seen_sensitive.add(marker)
+            try:
+                role_name = str(node.getRoleName() or "")  # type: ignore[attr-defined]
+            except Exception:
+                role_name = ""
+            if role_name and is_sensitive(node, role_name):
+                try:
+                    component = node.queryComponent()  # type: ignore[attr-defined]
+                    extents = component.getExtents(desktop_coords)
+                    x = int(getattr(extents, "x", 0))
+                    y = int(getattr(extents, "y", 0))
+                    w = int(getattr(extents, "width", 0))
+                    h = int(getattr(extents, "height", 0))
+                    if w > 0 and h > 0:
+                        fields.append(
+                            {
+                                "name": str(getattr(node, "name", "") or ""),
+                                "role": role_name,
+                                "x": x,
+                                "y": y,
+                                "w": w,
+                                "h": h,
+                            }
+                        )
+                except Exception:
+                    pass
+            try:
+                child_count = int(node.childCount)  # type: ignore[attr-defined]
+            except Exception:
+                return
+            for index in range(child_count):
+                if len(fields) >= limit or time.monotonic() >= deadline:
+                    return
+                try:
+                    child = node.getChildAtIndex(index)  # type: ignore[attr-defined]
+                except Exception:
+                    continue
+                if child is not None:
+                    walk_sensitive(child)
+
+        walk_sensitive(desktop)
+        print(json.dumps({"ok": True, "fields": fields[:limit]}, ensure_ascii=False))
+        return
+
     query = str(args.get("name") or "").strip()
     role = str(args.get("role") or "").strip()
     limit = max(1, min(int(args.get("limit") or 20), 100))
