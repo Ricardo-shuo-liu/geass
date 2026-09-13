@@ -1,5 +1,9 @@
 # Geass
 
+<p align="center">
+  <img src="assets/images/geass.png" alt="Geass terminal startup banner" width="694">
+</p>
+
 > English · [中文](README.zh.md)
 > Detailed docs: [English Guide](docs/en/index.md) · [中文使用手册](docs/zh/index.md) · [Design](docs/DESIGN.md)
 

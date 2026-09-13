@@ -1,5 +1,9 @@
 # Geass
 
+<p align="center">
+  <img src="assets/images/geass.png" alt="Geass 终端启动界面" width="694">
+</p>
+
 > [English](README.md) · 中文
 > 详细文档：[中文使用手册](docs/zh/index.md) · [English Guide](docs/en/index.md) · [设计文档](docs/DESIGN.md)
 
